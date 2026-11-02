@@ -432,27 +432,57 @@ function switchSection(sec) {
 }
 
 // ---------------------------------------------------------------- Matnni o'qish (OCR)
-// Bir nechta sahifa parallel o'qiladi: har bir "slot" — alohida Tesseract ishchisi.
+// Uch usul: telefonning o'zida (Tesseract), Google Gemini yoki Claude orqali (internet).
+// Bulutli usulda internet uzilsa, sahifa telefonning o'zida o'qiladi.
 const ocr = { slots: [], running: false, errShown: false };
 const OCR_RECYCLE = 40;          // ishchi shuncha sahifadan keyin xotirani bo'shatish uchun qayta yaratiladi
-const OCR_TIMEOUT_MS = 180000;   // bitta sahifa shundan uzoq o'qilsa, qayta urinib ko'riladi
-const OCR_MAX_DIM = 1800;        // o'qishdan oldin rasm shu o'lchamgacha kichraytiriladi
+const OCR_TIMEOUT_MS = 240000;   // telefonda bitta sahifa shundan uzoq o'qilsa, to'xtatiladi
+const OCR_MAX_DIM = 1800;        // telefonda o'qishdan oldin rasm shu o'lchamgacha kichraytiriladi
+const CLOUD_MAX_DIM = 1568;      // bulutga yuboriladigan rasm o'lchami (internetni tejaydi)
+const ANTHROPIC_SDK = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.135.0/+esm';
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
 
-// Telefonning yadro va xotirasiga qarab parallel ishchilar soni
+const OCR_PROMPT = `You are an OCR engine for photographed book pages.
+Transcribe all of the page's text exactly as printed, in its original language and script (Uzbek Latin, Uzbek Cyrillic, Russian, English or other). Never translate, correct, summarize or comment.
+- Keep Uzbek letters exactly: oʻ gʻ ʼ (and Cyrillic ў қ ғ ҳ).
+- Join the lines of one paragraph into a single line and remove end-of-line hyphenation.
+- Separate paragraphs and headings with one blank line.
+- Leave out the running header and the page number.
+Return only the transcribed text. If the page has no text, return nothing.`;
+
+// ---------- Sozlamalar (shu brauzerda saqlanadi)
+const ls = {
+  get(k, d = '') { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* */ } },
+};
+function ocrProvider() { return ls.get('kitob-ocr', 'local'); }
+function apiKey(prov = ocrProvider()) { return ls.get('kitob-key-' + prov).trim(); }
+function claudeModel() { return ls.get('kitob-claude-model', 'claude-opus-5-5'); }
+function isCloud(prov = ocrProvider()) { return prov !== 'local' && !!apiKey(prov); }
+const PROVIDER_NAME = { local: '📱 Telefonda', gemini: '☁ Gemini', claude: '☁ Claude' };
+
+function updateOcrChip() {
+  const prov = isCloud() ? ocrProvider() : 'local';
+  $('#ocrSettings').textContent = PROVIDER_NAME[prov] + ' ⚙';
+  document.body.dataset.ocr = prov === 'local' ? 'local' : 'cloud';
+}
+
+// Kuchsiz telefon uchun bitta ishchi; bulutda tarmoq kutiladi, shuning uchun bir nechta
 function ocrSlotCount() {
+  if (isCloud()) return ocrProvider() === 'gemini' ? 2 : 3;
   const cores = navigator.hardwareConcurrency || 2;
   const mem = navigator.deviceMemory || 4;
-  if (mem <= 2 || cores <= 2) return 1;
-  if (mem <= 4 || cores <= 4) return 2;
-  return 3;
+  return mem >= 8 && cores >= 8 ? 2 : 1;
 }
 
 function langCode() { return $('#lang').value; }
 function langName(code) {
   const o = [...$('#lang').options].find((x) => x.value === code);
-  return o ? o.textContent : code;
+  if (o) return o.textContent;
+  return { gemini: 'Gemini', claude: 'Claude' }[code] || code;
 }
 
+// ---------- Telefonning o'zida (Tesseract)
 async function slotWorker(slot) {
   if (!window.Tesseract) throw new Error('OCR moduli yuklanmadi — internetni tekshiring');
   const lang = langCode();
@@ -481,24 +511,25 @@ async function slotWorker(slot) {
   return slot.worker;
 }
 
-// Matn bo'limiga kirilganda til modellari oldindan yuklab qo'yiladi
+// Matn bo'limiga kirilganda til modeli oldindan yuklab qo'yiladi (faqat telefonda o'qish uchun)
 function warmUpOcr() {
+  if (isCloud()) return;
   if (!window.Tesseract) { setTimeout(warmUpOcr, 1000); return; }
   if (!ocr.slots.length) ocr.slots = Array.from({ length: ocrSlotCount() }, () => ({}));
   const s = ocr.slots[0];
   if (!s.worker && !s.ready) slotWorker(s).catch(() => {});
 }
 
-async function ocrInput(blob) {
-  // Juda katta rasmni kichraytirish o'qishni tezlashtiradi, sifatga ta'sir qilmaydi
+async function resizeImage(blob, maxDim, asJpeg) {
   const bmp = await createImageBitmap(blob);
-  const s = OCR_MAX_DIM / Math.max(bmp.width, bmp.height);
-  if (s >= 1) { bmp.close && bmp.close(); return blob; }
+  const s = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+  if (s === 1 && !asJpeg) { bmp.close && bmp.close(); return blob; }
   const c = document.createElement('canvas');
   c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
   c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
   bmp.close && bmp.close();
-  return c;
+  if (!asJpeg) return c;
+  return new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.85));
 }
 
 function withTimeout(promise, ms) {
@@ -514,25 +545,163 @@ function tidyText(t) {
     .join('\n\n');
 }
 
+async function localOcr(slot, blob) {
+  const worker = await slotWorker(slot);
+  const { data } = await withTimeout(worker.recognize(await resizeImage(blob, OCR_MAX_DIM)), OCR_TIMEOUT_MS);
+  slot.done++;
+  return { text: tidyText(data.text), lang: slot.lang };
+}
+
+// ---------- Bulut orqali (Gemini / Claude)
+class OfflineError extends Error {}
+class KeyError extends Error {}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function toBase64(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+let geminiModelName = null;
+async function geminiFetch(path, key, body) {
+  let res;
+  try {
+    res = await fetch(`${GEMINI_API}/${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'x-goog-api-key': key, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    throw new OfflineError('internet yo‘q');
+  }
+  const json = await res.json().catch(() => ({}));
+  if (res.ok) return json;
+  const msg = json.error?.message || `HTTP ${res.status}`;
+  if (res.status === 400 && /api key/i.test(msg) || res.status === 401 || res.status === 403) throw new KeyError('kalit noto‘g‘ri yoki ruxsat yo‘q');
+  const err = new Error(msg);
+  err.status = res.status;
+  throw err;
+}
+
+// Kalitga mos eng yangi "flash" modelni tanlaydi (model nomlari vaqt o'tib o'zgaradi)
+async function geminiModel(key) {
+  if (geminiModelName) return geminiModelName;
+  const { models = [] } = await geminiFetch('models?pageSize=200', key);
+  const ok = models.filter((m) => (m.supportedGenerationMethods || []).includes('generateContent') &&
+    /flash/.test(m.name) && !/(lite|image|tts|audio|live|embed|thinking)/.test(m.name));
+  const ver = (n) => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [0, 0])[1]);
+  const stable = (n) => (/(preview|exp)/.test(n) ? 0 : 1);
+  ok.sort((a, b) => stable(b.name) - stable(a.name) || ver(b.name) - ver(a.name));
+  if (!ok.length) throw new Error('mos Gemini modeli topilmadi');
+  geminiModelName = ok[0].name;                     // masalan: "models/gemini-…-flash"
+  return geminiModelName;
+}
+
+async function geminiOcr(jpeg, key) {
+  const model = await geminiModel(key);
+  const body = {
+    systemInstruction: { parts: [{ text: OCR_PROMPT }] },
+    contents: [{ role: 'user', parts: [
+      { inline_data: { mime_type: 'image/jpeg', data: await toBase64(jpeg) } },
+      { text: 'Transcribe this page.' },
+    ] }],
+    generationConfig: { temperature: 0 },
+  };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const json = await geminiFetch(`${model}:generateContent`, key, body);
+      const cand = json.candidates?.[0];
+      if (!cand) throw new Error(json.promptFeedback?.blockReason ? 'rad etildi' : 'javob bo‘sh');
+      return (cand.content?.parts || []).filter((p) => !p.thought && p.text).map((p) => p.text).join('');
+    } catch (e) {
+      // Bepul limit (daqiqasiga so'rovlar) tugasa yoki server band bo'lsa — kutib, qayta urinamiz
+      if ((e.status === 429 || e.status >= 500) && attempt < 6) { await sleep(Math.min(60000, 4000 * 2 ** attempt)); continue; }
+      if (e.status === 429) throw new Error('Gemini limiti tugadi — birozdan keyin ↻ bilan qayta urinib ko‘ring');
+      throw e;
+    }
+  }
+}
+
+let anthropicMod = null;
+async function claudeClient(key) {
+  if (!anthropicMod) {
+    try { anthropicMod = await import(ANTHROPIC_SDK); } catch (e) { throw new OfflineError('internet yo‘q'); }
+  }
+  const Anthropic = anthropicMod.default;
+  return { Anthropic, client: new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true, maxRetries: 4 }) };
+}
+
+async function claudeOcr(jpeg, key) {
+  const { Anthropic, client } = await claudeClient(key);
+  const model = claudeModel();
+  const params = {
+    model,
+    max_tokens: 16000,
+    output_config: { effort: 'low' },                // oddiy vazifa — kam o'ylash, tezroq va arzonroq
+    system: OCR_PROMPT,
+    messages: [{ role: 'user', content: [
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await toBase64(jpeg) } },
+      { type: 'text', text: 'Transcribe this page.' },
+    ] }],
+  };
+  let res;
+  try {
+    res = model === 'claude-opus-5-5'
+      // Xavfsizlik filtri noto'g'ri rad etsa, server so'rovni boshqa modelda qayta bajaradi
+      ? await client.beta.messages.create({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' })
+      : await client.messages.create(params);
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) throw new KeyError('kalit noto‘g‘ri yoki ruxsat yo‘q');
+    if (e instanceof Anthropic.RateLimitError) throw new Error('limit tugadi — birozdan keyin ↻ bilan qayta urinib ko‘ring');
+    if (e instanceof Anthropic.APIConnectionError) throw new OfflineError('internet yo‘q');
+    if (e instanceof Anthropic.APIError) throw new Error(e.message);
+    throw e;
+  }
+  if (res.stop_reason === 'refusal') throw new Error('sahifa rad etildi');
+  return res.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+}
+
+async function cloudOcr(blob) {
+  const prov = ocrProvider(), key = apiKey(prov);
+  if (!navigator.onLine) throw new OfflineError('internet yo‘q');
+  const jpeg = await resizeImage(blob, CLOUD_MAX_DIM, true);
+  const raw = prov === 'gemini' ? await geminiOcr(jpeg, key) : await claudeOcr(jpeg, key);
+  return { text: raw.replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim(), lang: prov };
+}
+
+// ---------- Navbat
 async function runSlot(slot) {
   let p;
   while ((p = books.text.find((x) => x.status === 'pending'))) {
-    p.status = 'working'; p.progress = 0; p.loading = false; slot.page = p;
+    p.status = 'working'; p.progress = 0; p.loading = false; p.cloud = isCloud(); slot.page = p;
     updateCard(p); updateCount();
     try {
-      const worker = await slotWorker(slot);
-      const input = await ocrInput(await store.getBlob(p.img));
-      const { data } = await withTimeout(worker.recognize(input), OCR_TIMEOUT_MS);
-      slot.done++;
+      const blob = await store.getBlob(p.img);
+      let r;
+      if (p.cloud) {
+        try { r = await cloudOcr(blob); } catch (e) {
+          if (!(e instanceof OfflineError)) throw e;
+          p.cloud = false; updateCard(p);                // internet yo'q — telefonning o'zida o'qiymiz
+          if (!ocr.offlineShown) { ocr.offlineShown = true; toast('Internet yo‘q — sahifalar telefonning o‘zida o‘qilmoqda'); }
+          r = await localOcr(slot, blob);
+        }
+      } else {
+        r = await localOcr(slot, blob);
+      }
       if (!books.text.includes(p)) continue;          // o'qilayotganda o'chirilgan
-      p.text = tidyText(data.text);
-      p.lang = slot.lang;
+      p.text = r.text;
+      p.lang = r.lang;
       p.status = 'done';
     } catch (e) {
       p.status = 'error';
       p.error = e.message || String(e);
-      if (!ocr.errShown) { ocr.errShown = true; toast('⚠ Matnni o‘qib bo‘lmadi: ' + p.error); }
-      if (slot.worker) { slot.worker.terminate().catch(() => {}); slot.worker = null; slot.ready = null; }
+      if (e instanceof KeyError) {
+        toast('⚠ API kalit noto‘g‘ri. «⚙» orqali kalitni tekshiring');
+        books.text.filter((x) => x.status === 'pending').forEach((x) => { x.status = 'error'; x.error = p.error; updateCard(x); });
+      } else if (!ocr.errShown) { ocr.errShown = true; toast('⚠ Matnni o‘qib bo‘lmadi: ' + p.error); }
+      if (slot.worker && !p.cloud) { slot.worker.terminate().catch(() => {}); slot.worker = null; slot.ready = null; }
     } finally {
       slot.page = null;
     }
@@ -547,8 +716,10 @@ async function ocrQueue() {
   ocr.running = true;
   keepAwake();
   try {
-    if (!ocr.slots.length) ocr.slots = Array.from({ length: ocrSlotCount() }, () => ({}));
-    await Promise.all(ocr.slots.map(runSlot));
+    // Usul o'zgargan bo'lsa, ishchilar soni ham yangilanadi (eski Tesseract ishchilari saqlanadi)
+    const n = ocrSlotCount();
+    while (ocr.slots.length < n) ocr.slots.push({});
+    await Promise.all(ocr.slots.slice(0, n).map(runSlot));
   } finally {
     ocr.running = false;
   }
@@ -560,9 +731,9 @@ function waitingCount() {
 }
 
 function onLangChange() {
-  try { localStorage.setItem('kitob-lang2', langCode()); } catch (e) { /* */ }
+  ls.set('kitob-lang3', langCode());
   const lang = langCode();
-  const other = books.text.filter((p) => p.status === 'done' && p.lang && p.lang !== lang);
+  const other = books.text.filter((p) => p.status === 'done' && p.lang && p.lang !== lang && !['gemini', 'claude'].includes(p.lang));
   toast(`Til: ${langName(lang)}. Keyingi sahifalar shu tilda o‘qiladi`);
   if (other.length && confirm(`${other.length} ta sahifa boshqa tilda o‘qilgan.\nUlarni ham «${langName(lang)}» tilida qaytadan o‘qiymi?\n(Ulardagi qo‘lda tuzatishlar o‘chadi)`)) {
     other.forEach((p) => { p.status = 'pending'; p.text = ''; });
@@ -572,6 +743,91 @@ function onLangChange() {
     ocrQueue();
   }
 }
+
+// ---------- O'qish usuli oynasi
+const KEY_HELP = {
+  gemini: 'Bepul kalit olish: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → Google hisobingiz bilan kiring → «Create API key» → kalitni nusxalab shu yerga qo‘ying.',
+  claude: 'Kalit olish: <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> → ro‘yxatdan o‘ting, hisobni to‘ldiring → «Create Key» → kalitni shu yerga qo‘ying.',
+};
+
+function ocrDialogProvider() { return $('#ocrOpts').querySelector('input:checked')?.value || 'local'; }
+
+function refreshOcrDialog() {
+  const prov = ocrDialogProvider();
+  $('#cloudBox').hidden = prov === 'local';
+  $('#claudeModelField').hidden = prov !== 'claude';
+  if (prov !== 'local') {
+    $('#keyLabel').textContent = prov === 'gemini' ? 'Google Gemini API kaliti' : 'Anthropic (Claude) API kaliti';
+    $('#keyHelp').innerHTML = KEY_HELP[prov];
+    $('#apiKey').value = apiKey(prov);
+  }
+  $('#keyStatus').textContent = '';
+}
+
+function openOcrDialog() {
+  const prov = ocrProvider();
+  $('#ocrOpts').querySelectorAll('input').forEach((i) => { i.checked = i.value === prov; });
+  $('#claudeModel').value = claudeModel();
+  refreshOcrDialog();
+  $('#ocrDialog').returnValue = '';
+  $('#ocrDialog').showModal();
+}
+
+async function testKey() {
+  const prov = ocrDialogProvider(), key = $('#apiKey').value.trim(), st = $('#keyStatus');
+  if (!key) { st.textContent = 'Avval kalitni kiriting'; return; }
+  st.textContent = 'Tekshirilmoqda…';
+  try {
+    if (prov === 'gemini') {
+      geminiModelName = null;
+      const m = await geminiModel(key);
+      st.textContent = `✔ Kalit ishlaydi (${m.replace('models/', '')})`;
+    } else {
+      const { Anthropic, client } = await claudeClient(key);
+      try {
+        // Tokenlarni sanash bepul — kalitni pul sarflamasdan tekshiradi
+        await client.messages.countTokens({ model: $('#claudeModel').value, messages: [{ role: 'user', content: 'test' }] });
+      } catch (e) {
+        if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) throw new KeyError('kalit noto‘g‘ri');
+        if (e instanceof Anthropic.APIConnectionError) throw new OfflineError('internet yo‘q');
+        throw e;
+      }
+      st.textContent = '✔ Kalit ishlaydi';
+    }
+  } catch (e) {
+    st.textContent = '✖ ' + (e instanceof KeyError || /401|403|auth|permission/i.test(String(e.status || e.message))
+      ? 'Kalit noto‘g‘ri' : e instanceof OfflineError ? 'Internet yo‘q' : (e.message || 'xato'));
+  }
+}
+
+$('#ocrOpts').addEventListener('change', refreshOcrDialog);
+$('#testKey').onclick = testKey;
+$('#ocrSettings').onclick = openOcrDialog;
+$('#ocrDialog').addEventListener('close', () => {
+  if ($('#ocrDialog').returnValue !== 'ok') return;
+  const prov = ocrDialogProvider();
+  if (prov !== 'local') {
+    const key = $('#apiKey').value.trim();
+    if (!key) { toast('Kalit kiritilmadi — telefonda o‘qish usuli qoldi'); return; }
+    if (key !== apiKey(prov)) geminiModelName = null;
+    ls.set('kitob-key-' + prov, key);
+    if (prov === 'claude') ls.set('kitob-claude-model', $('#claudeModel').value);
+  }
+  ls.set('kitob-ocr', prov);
+  ocr.errShown = false; ocr.offlineShown = false;
+  updateOcrChip();
+  toast(`O‘qish usuli: ${PROVIDER_NAME[prov]}`);
+  // Kalit xatosi tufayli to'xtagan sahifalarni yangi sozlama bilan qayta o'qiymiz
+  const failed = books.text.filter((p) => p.status === 'error');
+  if (failed.length && confirm(`${failed.length} ta sahifa o‘qilmay qolgan. Ularni yangi usulda qayta o‘qiymi?`)) {
+    failed.forEach((p) => { p.status = 'pending'; p.text = ''; });
+    store.saveList('text');
+    if (app.dataset.state === 'gallery') renderGallery();
+  }
+  updateCount();
+  ocrQueue();
+  if (!isCloud()) warmUpOcr();
+});
 
 // Ekran o'chib qolmasin — aks holda kamera va matn o'qish to'xtaydi
 let wakeLock = null;
@@ -751,15 +1007,17 @@ function updateCard(p) {
   const st = el.querySelector('.status'), bar = el.querySelector('.bar-mini'), ta = el.querySelector('textarea');
   const texts = {
     pending: '⏳ Navbatda',
-    working: p.loading && !p.progress
-      ? '⬇ Til ma’lumotlari yuklanmoqda…'
-      : `🔍 Matn o‘qilmoqda… ${Math.round((p.progress || 0) * 100)}%`,
+    working: p.cloud
+      ? '☁ Internet orqali o‘qilmoqda…'
+      : p.loading && !p.progress
+        ? '⬇ Til ma’lumotlari yuklanmoqda…'
+        : `🔍 Matn o‘qilmoqda… ${Math.round((p.progress || 0) * 100)}%`,
     done: `✔ ${p.lang ? langName(p.lang) + ' · ' : ''}${(p.text || '').split(/\s+/).filter(Boolean).length} so‘z`,
     error: `⚠ Xato: ${p.error || 'o‘qib bo‘lmadi'} — ↻ bilan qayta urinib ko‘ring`,
   };
   st.textContent = texts[p.status] || '';
   st.classList.toggle('err', p.status === 'error');
-  bar.style.display = p.status === 'working' ? 'block' : 'none';
+  bar.style.display = p.status === 'working' && !p.cloud ? 'block' : 'none';
   bar.firstElementChild.style.width = Math.round((p.progress || 0) * 100) + '%';
   const busy = p.status === 'pending' || p.status === 'working';
   ta.disabled = busy;
@@ -1271,7 +1529,8 @@ $('#sections').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (b) switchSection(b.dataset.section);
 });
-try { const l = localStorage.getItem('kitob-lang2'); if (l && [...$('#lang').options].some((o) => o.value === l)) $('#lang').value = l; } catch (e) { /* */ }
+{ const l = ls.get('kitob-lang3'); if (l && [...$('#lang').options].some((o) => o.value === l)) $('#lang').value = l; }
+updateOcrChip();
 $('#lang').onchange = onLangChange;
 $('#switchCam').onclick = () => { facing = facing === 'environment' ? 'user' : 'environment'; startCamera(); };
 if (navigator.canShare && navigator.canShare({ files: [new File([''], 'a.pdf', { type: 'application/pdf' })] })) {

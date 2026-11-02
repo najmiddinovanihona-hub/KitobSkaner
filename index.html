@@ -18,13 +18,14 @@
       <button data-section="image" class="on">🖼 Rasm</button>
       <button data-section="text">📝 Matn</button>
     </div>
-    <label class="text-only lang-label" for="lang">Til:</label>
-    <select id="lang" class="text-only" aria-label="Kitob tili">
-      <option value="uzb+uzb_cyrl+rus">Avto (lotin/kirill)</option>
-      <option value="uzb+eng">O‘zbek (lotin)</option>
-      <option value="uzb_cyrl+rus">Ўзбек (кирилл)</option>
-      <option value="rus+eng">Русский</option>
+    <button id="ocrSettings" class="text-only ocr-chip" title="Matnni o‘qish usuli">📱 Telefonda ⚙</button>
+    <label class="text-only local-only lang-label" for="lang">Til:</label>
+    <select id="lang" class="text-only local-only" aria-label="Kitob tili">
+      <option value="uzb">O‘zbek (lotin)</option>
+      <option value="uzb_cyrl">Ўзбек (кирилл)</option>
+      <option value="rus">Русский</option>
       <option value="eng">English</option>
+      <option value="uzb+uzb_cyrl+rus">Aralash (sekinroq)</option>
     </select>
     <div class="seg image-only" id="modes">
       <button data-mode="color">Rangli</button>
@@ -115,6 +116,41 @@
     <div class="dialog-buttons">
       <button value="cancel" class="btn" formnovalidate>Bekor qilish</button>
       <button value="ok" class="btn blue" id="dialogOk">📄 Yaratish</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="ocrDialog">
+  <form method="dialog">
+    <h2>📝 Matnni o‘qish usuli</h2>
+    <div class="ocr-opts" id="ocrOpts">
+      <label class="ocr-opt"><input type="radio" name="ocrProv" value="local">
+        <span><b>📱 Telefonning o‘zida</b><small>Internetsiz, bepul. Kuchsiz telefonda sekin (sahifaga 30–90 soniya), aniqligi o‘rtacha.</small></span></label>
+      <label class="ocr-opt"><input type="radio" name="ocrProv" value="gemini">
+        <span><b>☁ Google Gemini</b><small>Tez (sahifaga 3–8 soniya) va aniq. Bepul kalit, lekin daqiqa/kunlik limiti bor.</small></span></label>
+      <label class="ocr-opt"><input type="radio" name="ocrProv" value="claude">
+        <span><b>☁ Claude (Anthropic)</b><small>Eng aniq, tez. Pullik kalit — to‘lov sahifalar soniga qarab.</small></span></label>
+    </div>
+
+    <div class="cloud-only" id="cloudBox">
+      <label class="field"><span id="keyLabel">API kalit</span>
+        <span class="name-row"><input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Kalitni shu yerga qo‘ying"></span>
+      </label>
+      <p class="hint" id="keyHelp"></p>
+      <label class="field claude-only" id="claudeModelField">Model
+        <select id="claudeModel">
+          <option value="claude-opus-5-5">Claude Opus 5.5 — eng aniq (~0,03 $ / sahifa)</option>
+          <option value="claude-haiku-5-5">Claude Haiku 5.5 — arzon (~0,001 $ / sahifa)</option>
+        </select>
+      </label>
+      <p class="hint">Sahifa rasmlari tanlangan xizmatga yuboriladi (sahifaga ~0,2–0,3 MB internet). Kalit faqat shu telefonda saqlanadi. Internet uzilsa, sahifani telefonning o‘zi o‘qiydi.</p>
+      <button type="button" class="btn small" id="testKey">🔑 Kalitni tekshirish</button>
+      <span class="hint" id="keyStatus"></span>
+    </div>
+
+    <div class="dialog-buttons">
+      <button value="cancel" class="btn" formnovalidate>Bekor qilish</button>
+      <button value="ok" class="btn blue">Saqlash</button>
     </div>
   </form>
 </dialog>

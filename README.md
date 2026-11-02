@@ -49,14 +49,30 @@ Arxivda telefonda qancha joy band qilingani ko'rsatiladi. Arxiv shu brauzerning 
 
 ## 📝 Matn bo'limi (OCR)
 
-Yuqoridagi **📝 Matn** tugmasini bosing. Til standart holatda **Avto**: o'zbek lotin, o'zbek kirill va rus matnlari o'zi farqlanadi. Inglizcha kitoblar uchun **English**ni tanlang.
+Yuqoridagi **📝 Matn** tugmasini bosing, keyin **⚙** tugmasi bilan o'qish usulini tanlang.
+
+### O'qish usullari
+
+| Usul | Tezlik | Aniqlik | Internet | Narx |
+|---|---|---|---|---|
+| 📱 Telefonning o'zida | sekin (kuchsiz telefonda sahifaga 30–90 soniya) | o'rtacha | faqat birinchi marta ~5 MB | bepul |
+| ☁ Google Gemini | sahifaga 3–8 soniya | yuqori | sahifaga ~0,2–0,3 MB | bepul kalit (daqiqa va kunlik limit bilan) |
+| ☁ Claude (Anthropic) | tez | eng yuqori | sahifaga ~0,2–0,3 MB | pullik: Opus 5.5 ≈ 0,03 $/sahifa, Haiku 5.5 ≈ 0,001 $/sahifa |
+
+- **Gemini kaliti (bepul):** [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → Google hisobi bilan kiring → «Create API key».
+- **Claude kaliti:** [console.anthropic.com](https://console.anthropic.com/settings/keys) → hisobni to'ldiring → «Create Key».
+- Kalit faqat shu telefonda saqlanadi. **🔑 Kalitni tekshirish** tugmasi kalitni pul sarflamasdan tekshiradi.
+- Bulutli usulda sahifa rasmlari tanlangan xizmatga yuboriladi.
+- Internet uzilsa, sahifalar avtomatik ravishda telefonning o'zida o'qiladi.
+
+**Telefonda o'qishda** kitob tilini aniq tanlang: o'zbek (lotin), o'zbek (kirill), rus yoki ingliz. Noto'g'ri til tanlansa, matn buzilib chiqadi. «Aralash» varianti sekinroq ishlaydi.
 
 1. Sahifani suratga olib, **Saqlash va keyingi**ni bosing. Sahifadagi matn orqa fonda o'zi o'qib olinadi, siz shu vaqtda keyingi sahifani olishda davom etasiz.
 2. **📝 Matnlar** ro'yxatida har bir sahifaning matni va qaysi tilda o'qilgani turadi. Xatolarni o'sha yerning o'zida tuzatish mumkin, o'zgarishlar o'zi saqlanadi. **↻** sahifani hozirgi tilda qaytadan o'qiydi.
 3. Tilni o'zgartirsangiz, ilova boshqa tilda o'qilgan sahifalarni yangi tilda qayta o'qishni taklif qiladi.
 4. **📄 PDF yaratish** bosilganda **matnli PDF** chiqadi: undagi matnni belgilab nusxa olish va qidirish mumkin. 500 sahifali matnli PDF bir necha soniyada tayyor bo'ladi va 1 MB atrofida chiqadi. **📋 Matnni nusxalash** tugmasi butun matnni nusxalaydi.
 
-Matn bo'limiga kirishingiz bilan til ma'lumotlari (~7 MB) oldindan yuklana boshlaydi, keyingi safar ular brauzerda saqlangan bo'ladi. Telefonning yadro va xotira hajmiga qarab 2–3 ta sahifa **bir vaqtda parallel** o'qiladi. Bitta sahifa qotib qolsa, 3 daqiqadan keyin xato bilan to'xtatiladi va uni ↻ bilan qayta o'qish mumkin.
+Telefonda o'qishda matn bo'limiga kirishingiz bilan til modeli oldindan yuklanadi. Kuchsiz telefonda sahifalar bittadan o'qiladi, bulutli usulda esa 2–3 tadan parallel. Bitta sahifa qotib qolsa, xato bilan to'xtatiladi va uni ↻ bilan qayta o'qish mumkin.
 
 ## Katta kitoblar uchun maslahatlar
 
