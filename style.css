@@ -109,6 +109,20 @@ dialog h2 { font-size: 18px; }
 .bar-mini { height: 4px; background: #34343f; border-radius: 2px; overflow: hidden; }
 .bar-mini i { display: block; height: 100%; background: #3cdc5a; width: 0; transition: width .3s; }
 
+.lang-label { font-size: 13px; color: #b9b9c6; margin-right: -6px; }
+.quality { margin-top: 14px; }
+.quality select { display: block; width: 100%; margin-top: 6px; padding: 11px; border-radius: 10px; border: 1px solid #44444f;
+  background: #24242c; color: #ececf1; font: inherit; font-size: 15px; }
+.quality .hint { display: block; margin: 6px 0 0; }
+
+#busy { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.75); display: none; place-items: center; }
+#busy.show { display: grid; }
+#busy .bbox { width: min(360px, calc(100% - 40px)); background: #1f1f26; border-radius: 16px; padding: 22px; text-align: center; }
+#busy .btext { font-weight: 700; font-size: 16px; }
+#busy .bbar { height: 8px; background: #34343f; border-radius: 4px; overflow: hidden; margin: 14px 0 10px; }
+#busy .bfill { display: block; height: 100%; width: 0; background: #3cdc5a; transition: width .2s; }
+#busy .bnote { color: #9a9aa8; font-size: 12px; }
+
 #viewer { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; place-items: center; z-index: 10; cursor: zoom-out; }
 #viewer.show { display: grid; }
 #viewer img { max-width: 96vw; max-height: 92vh; }
@@ -134,6 +148,7 @@ dialog h2 { font-size: 18px; }
 
 @media (max-width: 600px) {
   .brand { width: 100%; }
+  .count, .lang-label { display: none; }
   .review-only, .done-only { flex-wrap: wrap; }
   .review-only .btn:not(.big) { flex: 1; }
   .review-only .btn.big { flex-basis: 100%; }

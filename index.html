@@ -10,7 +10,7 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-section="image">
 <div id="app" data-state="live" data-section="image">
   <header>
     <div class="brand">📖 Kitob Skaner</div>
@@ -18,7 +18,9 @@
       <button data-section="image" class="on">🖼 Rasm</button>
       <button data-section="text">📝 Matn</button>
     </div>
+    <label class="text-only lang-label" for="lang">Til:</label>
     <select id="lang" class="text-only" aria-label="Kitob tili">
+      <option value="uzb+uzb_cyrl+rus">Avto (lotin/kirill)</option>
       <option value="uzb+eng">O‘zbek (lotin)</option>
       <option value="uzb_cyrl+rus">Ўзбек (кирилл)</option>
       <option value="rus+eng">Русский</option>
@@ -51,6 +53,7 @@
     <section id="archivePanel" class="panel">
       <h2>🗂 Arxiv</h2>
       <p class="hint">Yaratilgan barcha PDF’lar sahifalari bilan shu yerda saqlanadi. Istalgan vaqtda qayta yuklash, nomini o‘zgartirish yoki sahifalarini qayta tahrirga olish mumkin.</p>
+      <p class="hint" id="storageInfo"></p>
       <div id="archiveList" class="alist"></div>
     </section>
 
@@ -101,6 +104,14 @@
     <label class="field">Fayl nomi
       <span class="name-row"><input id="pdfName" type="text" autocomplete="off" required><span>.pdf</span></span>
     </label>
+    <label class="field image-only quality">Sifat
+      <select id="pdfQuality">
+        <option value="high">Yuqori (asl rasmlar)</option>
+        <option value="medium">O‘rta — kichikroq fayl</option>
+        <option value="low">Past — eng kichik fayl</option>
+      </select>
+      <span class="hint" id="sizeHint"></span>
+    </label>
     <div class="dialog-buttons">
       <button value="cancel" class="btn" formnovalidate>Bekor qilish</button>
       <button value="ok" class="btn blue">📄 Yaratish</button>
@@ -109,6 +120,7 @@
 </dialog>
 
 <div id="viewer"><img alt="Sahifa"></div>
+<div id="busy"><div class="bbox"><div class="btext"></div><div class="bbar"><i class="bfill"></i></div><div class="bnote">Ilovani yopmang</div></div></div>
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>

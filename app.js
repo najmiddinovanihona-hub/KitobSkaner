@@ -8,7 +8,8 @@ const MAX_DIM = 2200;            // olingan rasmning eng katta tomoni
 const DETECT_W = 480;            // sahifani topish uchun kichik kadr eni
 const AUTO_STABLE_MS = 1300;     // avto-olish: sahifa shuncha qimirlamasa
 const AUTO_COOLDOWN_MS = 2500;
-const JPEG_Q = 0.88;
+const JPEG_Q = 0.82;
+const THUMB_DIM = 360;           // galereyadagi kichik rasm o'lchami
 
 let cvReady = false;
 let stream = null, facing = 'environment';
@@ -17,10 +18,11 @@ let mode = 'gray';
 let section = 'image';
 const books = { image: [], text: [] };
 const pdfs = { image: null, text: null };
-let pages = books.image;         // joriy bo'lim sahifalari: {id, blob, url, w, h, [text, status, progress]}
+let pages = books.image;         // joriy bo'lim sahifalari: {id, w, h, img, th, [text, status, lang]} (img/th — rasm kalitlari)
 let raw = null, rawQuad = null, rotation = 0, current = null;
 let lastQuad = null, prevQuad = null, stableSince = 0, cooldownUntil = 0;
-let lastPdf = null;               // {blob, name}
+let lastPdf = null;               // arxivdagi oxirgi PDF
+let archive = [];                 // {id, name, date, section, pdfKey, size, pages: [{w, h, img, th, text}]}
 
 // ---------------------------------------------------------------- OpenCV
 async function onOpenCvLoaded() {
@@ -271,52 +273,144 @@ function handleAuto(quad) {
 
 
 // ---------------------------------------------------------------- Saqlash (sahifa yangilansa ham yo'qolmaydi)
+// Har bir rasm IndexedDB'da bir marta, o'z kaliti bilan yoziladi. Ro'yxatlarda faqat
+// kichik ma'lumot (kalit, o'lcham, matn) turadi — 500 sahifada ham saqlash tez qoladi.
 const store = {
   db: null,
   async open() {
     if (this.db || !window.indexedDB) return this.db;
     this.db = await new Promise((ok, fail) => {
-      const req = indexedDB.open('kitob-skaner', 1);
-      req.onupgradeneeded = () => req.result.createObjectStore('kv');
+      const req = indexedDB.open('kitob-skaner', 2);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs');
+      };
       req.onsuccess = () => ok(req.result);
       req.onerror = () => fail(req.error);
     }).catch(() => null);
     return this.db;
   },
-  async run(fn) {
+  async run(name, fn, mode = 'readwrite') {
     const db = await this.open();
     if (!db) return null;
     return new Promise((ok) => {
-      const tx = db.transaction('kv', 'readwrite'), req = fn(tx.objectStore('kv'));
+      const tx = db.transaction(name, mode), req = fn(tx.objectStore(name));
       tx.oncomplete = () => ok(req && req.result);
-      tx.onerror = () => ok(null);
+      tx.onerror = tx.onabort = () => ok(null);
     });
   },
-  key: (sec) => (sec === 'text' ? 'textPages' : 'pages'),
-  save(sec = section) {
-    const list = books[sec].map(({ id, blob, w, h, text, status }) =>
-      ({ id, blob, w, h, text, status: status === 'working' ? 'pending' : status }));
-    return this.run((s) => s.put(list, this.key(sec)));
+  get(key) { return this.run('kv', (s) => s.get(key), 'readonly'); },
+  put(key, val) { return this.run('kv', (s) => s.put(val, key)); },
+  del(key) { return this.run('kv', (s) => s.delete(key)); },
+  async putBlob(blob) {
+    const key = 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    await this.run('blobs', (s) => s.put(blob, key));
+    return key;
   },
-  load(sec) { return this.run((s) => s.get(this.key(sec))); },
-  saveArchive() { return this.run((s) => s.put(archive, 'archive')); },
-  loadArchive() { return this.run((s) => s.get('archive')); },
+  getBlob(key) { return this.run('blobs', (s) => s.get(key), 'readonly'); },
+
+  saveList(sec = section) {
+    const list = books[sec].map(({ id, w, h, img, th, text, status, lang }) =>
+      ({ id, w, h, img, th, text, lang, status: status === 'working' ? 'pending' : status }));
+    return this.put('list:' + sec, list);
+  },
+  loadList(sec) { return this.get('list:' + sec); },
+  saveArchive() { return this.put('archive2', archive); },
+  loadArchive() { return this.get('archive2'); },
+
+  // Hech qayerda ishlatilmay qolgan rasmlarni o'chiradi
+  async gc() {
+    const used = new Set();
+    const mark = (p) => { used.add(p.img); used.add(p.th); };
+    books.image.forEach(mark); books.text.forEach(mark);
+    archive.forEach((e) => { used.add(e.pdfKey); e.pages.forEach(mark); });
+    const keys = (await this.run('blobs', (s) => s.getAllKeys(), 'readonly')) || [];
+    const dead = keys.filter((k) => !used.has(k));
+    if (dead.length) await this.run('blobs', (s) => { dead.forEach((k) => s.delete(k)); return null; });
+    dead.forEach(forgetUrl);
+  },
+
+  // Eski versiyada rasmlar ro'yxat ichida saqlangan edi — yangi tuzilmaga o'tkazamiz
+  async migrate() {
+    for (const [oldKey, sec] of [['pages', 'image'], ['textPages', 'text']]) {
+      const old = await this.get(oldKey);
+      if (!old) continue;
+      for (const p of old) {
+        const { img, th } = await this.saveImages(p.blob);
+        books[sec].push({ id: p.id, w: p.w, h: p.h, img, th, text: p.text, status: p.status });
+      }
+      await this.saveList(sec);
+      await this.del(oldKey);
+    }
+    const oldArchive = await this.get('archive');
+    if (oldArchive) {
+      for (const e of oldArchive) {
+        const pg = [];
+        for (const p of e.pages) {
+          const { img, th } = await this.saveImages(p.blob);
+          pg.push({ w: p.w, h: p.h, img, th, text: p.text });
+        }
+        archive.push({ id: e.id, name: e.name, date: e.date, section: e.section,
+          pdfKey: await this.putBlob(e.pdf), size: e.pdf.size, pages: pg });
+      }
+      await this.saveArchive();
+      await this.del('archive');
+    }
+  },
+  async saveImages(blob) {
+    const thumb = await makeThumb(blob);
+    return { img: await this.putBlob(blob), th: await this.putBlob(thumb) };
+  },
 };
 
-async function restorePages() {
-  archive = (await store.loadArchive()) || [];
-  updateCount();
-  let total = 0;
-  for (const sec of ['image', 'text']) {
-    const saved = await store.load(sec);
-    if (!saved || !saved.length) continue;
-    books[sec].push(...saved.map((p) => ({ ...p, url: URL.createObjectURL(p.blob) })));
-    total += saved.length;
+async function makeThumb(source) {
+  const bmp = await createImageBitmap(source);
+  const s = Math.min(1, THUMB_DIM / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close && bmp.close();
+  return new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.72));
+}
+
+// Kichik rasmlar uchun URL kesh
+const urlCache = new Map();
+async function urlFor(key) {
+  if (urlCache.has(key)) return urlCache.get(key);
+  const blob = await store.getBlob(key);
+  if (!blob) return '';
+  const url = URL.createObjectURL(blob);
+  urlCache.set(key, url);
+  return url;
+}
+function forgetUrl(key) {
+  const u = urlCache.get(key);
+  if (u) { URL.revokeObjectURL(u); urlCache.delete(key); }
+}
+
+// Ko'rinadigan joyga kelgan rasmlarnigina yuklaydi (500 sahifada ham galereya tez ochiladi)
+const lazy = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    if (!en.isIntersecting) continue;
+    const img = en.target;
+    lazy.unobserve(img);
+    urlFor(img.dataset.key).then((u) => { img.src = u; });
   }
-  if (!total) return;
+}, { rootMargin: '400px' });
+
+async function restorePages() {
+  await store.migrate();
+  archive.push(...((await store.loadArchive()) || []).filter((e) => !archive.some((a) => a.id === e.id)));
+  for (const sec of ['image', 'text']) {
+    if (books[sec].length) continue;
+    const saved = await store.loadList(sec);
+    if (saved && saved.length) books[sec].push(...saved);
+  }
   updateCount();
+  const total = books.image.length + books.text.length;
+  if (total) toast(`Oldingi ${total} ta sahifa tiklandi`);
   ocrQueue();
-  toast(`Oldingi ${total} ta sahifa tiklandi`);
 }
 
 function switchSection(sec) {
@@ -326,6 +420,7 @@ function switchSection(sec) {
   pages = books[sec];
   lastPdf = pdfs[sec];
   app.dataset.section = sec;
+  document.body.dataset.section = sec;
   document.querySelectorAll('#sections button').forEach((b) => b.classList.toggle('on', b.dataset.section === sec));
   updateCount();
   if (app.dataset.state === 'review') render();
@@ -336,18 +431,30 @@ function switchSection(sec) {
 }
 
 // ---------------------------------------------------------------- Matnni o'qish (OCR)
-const ocr = { worker: null, lang: null, busy: false };
+const ocr = { worker: null, lang: null, busy: false, done: 0, errShown: false };
+const OCR_RECYCLE = 40;          // shuncha sahifadan keyin xotirani bo'shatish uchun qayta ishga tushiriladi
 
 function langCode() { return $('#lang').value; }
+function langName(code) {
+  const o = [...$('#lang').options].find((x) => x.value === code);
+  return o ? o.textContent : code;
+}
 
 async function getWorker() {
-  if (!window.Tesseract) throw new Error('OCR moduli yuklanmadi');
+  if (!window.Tesseract) throw new Error('OCR moduli yuklanmadi — internetni tekshiring');
   const lang = langCode();
+  if (ocr.worker && ocr.done >= OCR_RECYCLE) {
+    await ocr.worker.terminate().catch(() => {});
+    ocr.worker = null; ocr.done = 0;
+  }
   if (!ocr.worker) {
     ocr.worker = await Tesseract.createWorker(lang, 1, {
       logger: (m) => {
         const p = books.text.find((x) => x.status === 'working');
-        if (p && m.status === 'recognizing text') { p.progress = m.progress; updateCard(p); }
+        if (!p) return;
+        if (m.status === 'recognizing text') p.progress = m.progress;
+        else if (/load|initializ/i.test(m.status)) p.loading = true;
+        updateCard(p);
       },
     });
     ocr.lang = lang;
@@ -370,22 +477,28 @@ function tidyText(t) {
 async function ocrQueue() {
   if (ocr.busy) return;
   ocr.busy = true;
+  keepAwake();
   try {
     let p;
     while ((p = books.text.find((x) => x.status === 'pending'))) {
-      p.status = 'working'; p.progress = 0; updateCard(p);
+      p.status = 'working'; p.progress = 0; p.loading = false; updateCard(p); updateCount();
       try {
         const worker = await getWorker();
-        const { data } = await worker.recognize(p.blob);
+        const blob = await store.getBlob(p.img);
+        const { data } = await worker.recognize(blob);
+        ocr.done++;
         if (!books.text.includes(p)) continue;          // o'qilayotganda o'chirilgan
         p.text = tidyText(data.text);
+        p.lang = ocr.lang;
         p.status = 'done';
       } catch (e) {
         p.status = 'error';
         p.error = e.message || String(e);
+        if (!ocr.errShown) { ocr.errShown = true; toast('⚠ Matnni o‘qib bo‘lmadi: ' + p.error); }
+        if (ocr.worker) { await ocr.worker.terminate().catch(() => {}); ocr.worker = null; }
       }
       updateCard(p);
-      store.save('text');
+      store.saveList('text');
       updateCount();
     }
   } finally {
@@ -395,6 +508,31 @@ async function ocrQueue() {
 
 function waitingCount() {
   return books.text.filter((p) => p.status === 'pending' || p.status === 'working').length;
+}
+
+function onLangChange() {
+  try { localStorage.setItem('kitob-lang2', langCode()); } catch (e) { /* */ }
+  const lang = langCode();
+  const other = books.text.filter((p) => p.status === 'done' && p.lang && p.lang !== lang);
+  toast(`Til: ${langName(lang)}. Keyingi sahifalar shu tilda o‘qiladi`);
+  if (other.length && confirm(`${other.length} ta sahifa boshqa tilda o‘qilgan.\nUlarni ham «${langName(lang)}» tilida qaytadan o‘qiymi?\n(Ulardagi qo‘lda tuzatishlar o‘chadi)`)) {
+    other.forEach((p) => { p.status = 'pending'; p.text = ''; });
+    store.saveList('text');
+    if (app.dataset.state === 'gallery') renderGallery();
+    updateCount();
+    ocrQueue();
+  }
+}
+
+// Ekran o'chib qolmasin — aks holda kamera va matn o'qish to'xtaydi
+let wakeLock = null;
+async function keepAwake() {
+  try {
+    if (!wakeLock && navigator.wakeLock && document.visibilityState === 'visible') {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch (e) { /* qo'llab-quvvatlanmaydi */ }
 }
 
 // ---------------------------------------------------------------- Suratga olish
@@ -418,18 +556,24 @@ function render() {
   result.src = current.toDataURL('image/jpeg', JPEG_Q);
 }
 
+let persistAsked = false;
 async function savePage() {
   if (!current) return;
   const c = current;
   current = null; raw = null;
   const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', JPEG_Q));
-  const page = { id: Date.now() + Math.random(), blob, url: URL.createObjectURL(blob), w: c.width, h: c.height };
+  const { img, th } = await store.saveImages(blob);
+  const page = { id: Date.now() + Math.random(), w: c.width, h: c.height, img, th };
   if (section === 'text') Object.assign(page, { text: '', status: 'pending' });
   pages.push(page);
   lastPdf = null;
   updateCount();
-  store.save();
+  await store.saveList();
   if (section === 'text') ocrQueue();
+  if (!persistAsked && navigator.storage && navigator.storage.persist) {
+    persistAsked = true;
+    navigator.storage.persist().catch(() => {});      // brauzer joy tanqisligida o'chirib yubormasin
+  }
 }
 
 function backToLive() {
@@ -442,39 +586,52 @@ function backToLive() {
 function openGallery() {
   renderGallery();
   setState('gallery');
+  const panel = $('#gallery');
+  requestAnimationFrame(() => { panel.scrollTop = panel.scrollHeight; });   // eng oxirgi sahifalar ko'rinsin
+}
+
+function lazyImg(img, key) {
+  img.dataset.key = key;
+  const cached = urlCache.get(key);
+  if (cached) img.src = cached; else lazy.observe(img);
 }
 
 function renderGallery() {
   const grid = $('#grid');
+  grid.querySelectorAll('img').forEach((i) => lazy.unobserve(i));
   grid.innerHTML = '';
   grid.classList.toggle('list', section === 'text');
+  $('#makePdf').disabled = !pages.length;
   if (section === 'text') { renderTextGallery(grid); return; }
   if (!pages.length) {
     grid.innerHTML = '<div class="empty">Hali sahifa yo‘q. «Davom ettirish»ni bosib, sahifalarni suratga oling.</div>';
   }
+  const frag = document.createDocumentFragment();
   pages.forEach((p, i) => {
     const el = document.createElement('div');
     el.className = 'thumb';
-    el.innerHTML = `<img src="${p.url}" alt="${i + 1}-sahifa"><span class="num">${i + 1}</span>
+    el.innerHTML = `<img alt="${i + 1}-sahifa"><span class="num">${i + 1}</span>
       <div class="acts">
         <button data-act="left" title="Oldinga" ${i === 0 ? 'disabled' : ''}>◀</button>
         <button data-act="del" class="del" title="O‘chirish">🗑</button>
         <button data-act="right" title="Orqaga" ${i === pages.length - 1 ? 'disabled' : ''}>▶</button>
       </div>`;
-    el.querySelector('img').onclick = () => showViewer(p.url);
+    const img = el.querySelector('img');
+    lazyImg(img, p.th);
+    img.onclick = () => showViewer(p.img);
     el.querySelector('.acts').onclick = (e) => {
       const act = e.target.closest('button')?.dataset.act;
       if (act) movePage(i, act);
     };
-    grid.appendChild(el);
+    frag.appendChild(el);
   });
-  $('#makePdf').disabled = !pages.length;
+  grid.appendChild(frag);
 }
 
 function movePage(i, act) {
+  const panel = $('#gallery'), top = panel.scrollTop;
   if (act === 'del') {
     if (!confirm(`${i + 1}-sahifani o‘chirasizmi?`)) return;
-    URL.revokeObjectURL(pages[i].url);
     pages.splice(i, 1);
   } else {
     const j = act === 'left' ? i - 1 : i + 1;
@@ -482,26 +639,28 @@ function movePage(i, act) {
   }
   lastPdf = null;
   updateCount();
-  store.save();
+  store.saveList().then(() => act === 'del' && store.gc());
   renderGallery();
+  panel.scrollTop = top;
 }
 
 function renderTextGallery(grid) {
   if (!pages.length) {
     grid.innerHTML = '<div class="empty">Hali sahifa yo‘q. «Davom ettirish»ni bosib, sahifalarni suratga oling — matni o‘zi o‘qib olinadi.</div>';
   }
+  const frag = document.createDocumentFragment();
   pages.forEach((p, i) => {
     const el = document.createElement('div');
     el.className = 'tcard';
     el.dataset.id = p.id;
     el.innerHTML = `
       <div class="side">
-        <img src="${p.url}" alt="${i + 1}-sahifa">
+        <img alt="${i + 1}-sahifa">
         <div class="acts">
           <button data-act="left" title="Oldinga" ${i === 0 ? 'disabled' : ''}>◀</button>
           <button data-act="right" title="Orqaga" ${i === pages.length - 1 ? 'disabled' : ''}>▶</button>
           <button data-act="del" class="del" title="O‘chirish">🗑</button>
-          <button data-act="redo" title="Matnni qayta o‘qish">↻</button>
+          <button data-act="redo" title="Matnni hozirgi tilda qayta o‘qish">↻</button>
         </div>
       </div>
       <div class="main">
@@ -509,30 +668,32 @@ function renderTextGallery(grid) {
         <div class="bar-mini"><i></i></div>
         <textarea spellcheck="false" placeholder="Matn…"></textarea>
       </div>`;
+    const img = el.querySelector('img');
+    lazyImg(img, p.th);
+    img.onclick = () => showViewer(p.img);
     const ta = el.querySelector('textarea');
     ta.value = p.text || '';
     ta.oninput = () => {
       p.text = ta.value;
       lastPdf = null;
-      clearTimeout(ta.t); ta.t = setTimeout(() => store.save('text'), 400);
+      clearTimeout(ta.t); ta.t = setTimeout(() => store.saveList('text'), 500);
     };
-    el.querySelector('img').onclick = () => showViewer(p.url);
     el.querySelector('.acts').onclick = (e) => {
       const act = e.target.closest('button')?.dataset.act;
       if (!act) return;
       if (act === 'redo') {
         if (p.status === 'working') return;
-        if (p.text && !confirm('Tuzatgan matningiz o‘rniga sahifa qaytadan o‘qiladi. Davom etasizmi?')) return;
+        if (p.text && !confirm(`Sahifa «${langName(langCode())}» tilida qaytadan o‘qiladi, tuzatishlaringiz o‘chadi. Davom etasizmi?`)) return;
         p.status = 'pending'; p.text = ''; lastPdf = null;
-        updateCard(p); store.save('text'); ocrQueue();
+        updateCard(p); store.saveList('text'); updateCount(); ocrQueue();
         return;
       }
       movePage(i, act);
     };
-    grid.appendChild(el);
-    updateCard(p);
+    frag.appendChild(el);
   });
-  $('#makePdf').disabled = !pages.length;
+  grid.appendChild(frag);
+  pages.forEach(updateCard);
 }
 
 function updateCard(p) {
@@ -541,8 +702,10 @@ function updateCard(p) {
   const st = el.querySelector('.status'), bar = el.querySelector('.bar-mini'), ta = el.querySelector('textarea');
   const texts = {
     pending: '⏳ Navbatda',
-    working: `🔍 Matn o‘qilmoqda… ${Math.round((p.progress || 0) * 100)}%`,
-    done: `✔ O‘qildi · ${(p.text || '').split(/\s+/).filter(Boolean).length} so‘z`,
+    working: p.loading && !p.progress
+      ? '⬇ Til ma’lumotlari yuklanmoqda…'
+      : `🔍 Matn o‘qilmoqda… ${Math.round((p.progress || 0) * 100)}%`,
+    done: `✔ ${p.lang ? langName(p.lang) + ' · ' : ''}${(p.text || '').split(/\s+/).filter(Boolean).length} so‘z`,
     error: `⚠ Xato: ${p.error || 'o‘qib bo‘lmadi'} — ↻ bilan qayta urinib ko‘ring`,
   };
   st.textContent = texts[p.status] || '';
@@ -554,9 +717,14 @@ function updateCard(p) {
   if (!busy && document.activeElement !== ta && ta.value !== (p.text || '')) ta.value = p.text || '';
 }
 
-function showViewer(url) {
+let viewerUrl = null;
+async function showViewer(key) {
+  const blob = await store.getBlob(key);
+  if (!blob) return;
+  if (viewerUrl) URL.revokeObjectURL(viewerUrl);
+  viewerUrl = URL.createObjectURL(blob);
   const v = $('#viewer');
-  v.querySelector('img').src = url;
+  v.querySelector('img').src = viewerUrl;
   v.classList.add('show');
 }
 $('#viewer').onclick = () => $('#viewer').classList.remove('show');
@@ -583,50 +751,278 @@ function askPdfName() {
     ? `${pages.length} ta sahifaning matni bitta matnli PDF faylga yig‘iladi.`
     : `${pages.length} ta sahifa bitta PDF faylga yig‘iladi.`;
   $('#pdfName').value = lastPdf ? lastPdf.name.replace(/\.pdf$/, '') : defaultName();
+  $('#pdfQuality').value = pages.length > 100 ? 'medium' : 'high';
+  sizeSample = null;
+  if (section === 'image') updateSizeHint();
   dlg.returnValue = '';
   dlg.showModal();
   setTimeout(() => $('#pdfName').select(), 50);
 }
 
+const QUALITY = {
+  high: { dim: 0, q: 0 },                    // asl rasmlar, qayta siqilmaydi
+  medium: { dim: 1400, q: 0.7 },
+  low: { dim: 1100, q: 0.55 },               // matn hali bemalol o'qiladi
+};
+
+// Hajmni bir nechta haqiqiy sahifani siqib ko'rib taxmin qiladi
+let sizeSample = null;
+async function updateSizeHint() {
+  const el = $('#sizeHint'), quality = $('#pdfQuality').value;
+  el.textContent = 'Hajm hisoblanmoqda…';
+  if (!sizeSample) {
+    const idx = [...new Set([0, Math.floor(pages.length / 2), pages.length - 1])];
+    sizeSample = (await Promise.all(idx.map((i) => store.getBlob(pages[i].img)))).filter(Boolean);
+    sizeSample.cache = {};
+  }
+  if (!sizeSample.length) { el.textContent = ''; return; }
+  if (sizeSample.cache[quality] === undefined) {
+    let sum = 0;
+    for (const b of sizeSample) sum += quality === 'high' ? b.size : (await shrink(b, QUALITY[quality])).blob.size;
+    sizeSample.cache[quality] = sum / sizeSample.length;
+  }
+  if ($('#pdfQuality').value !== quality) return;
+  const mb = (sizeSample.cache[quality] * pages.length) / 1048576;
+  el.textContent = `Taxminiy hajm: ~${mb < 1 ? '1' : Math.round(mb)} MB` +
+    (mb > 100 && quality !== 'low'
+      ? ` — katta fayl, ${quality === 'high' ? '«O‘rta» yoki «Past»' : '«Past»'}ni tanlash tavsiya etiladi`
+      : '');
+}
+$('#pdfQuality').onchange = updateSizeHint;
+
 $('#pdfDialog').addEventListener('close', () => {
-  if ($('#pdfDialog').returnValue === 'ok') makePdf(cleanName($('#pdfName').value));
+  if ($('#pdfDialog').returnValue === 'ok') makePdf(cleanName($('#pdfName').value), $('#pdfQuality').value);
 });
 
-async function makePdf(name) {
-  toast('PDF tayyorlanmoqda…');
+function busy(text, frac) {
+  const b = $('#busy');
+  if (text === null) { b.classList.remove('show'); return; }
+  b.classList.add('show');
+  b.querySelector('.btext').textContent = text;
+  b.querySelector('.bfill').style.width = Math.round((frac || 0) * 100) + '%';
+}
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+async function makePdf(name, quality = 'high') {
+  keepAwake();
+  busy('PDF tayyorlanmoqda…', 0);
   let blob;
   try {
-    blob = section === 'text' ? await buildTextPdf() : await buildImagePdf();
+    blob = section === 'text' ? await buildTextPdf() : await buildImagePdf(quality);
   } catch (e) {
+    busy(null);
     toast('PDF yaratib bo‘lmadi: ' + (e.message || e));
     return;
   }
+  busy('Arxivga saqlanmoqda…', 1);
   // PDF va uning sahifalari arxivga tushadi, ish ro'yxati yangi kitob uchun bo'shaydi
   const entry = {
-    id: Date.now(), name: name + '.pdf', date: Date.now(), section, pdf: blob,
-    pages: pages.map(({ blob: b, w, h, text }) => ({ blob: b, w, h, text })),
+    id: Date.now(), name: name + '.pdf', date: Date.now(), section,
+    pdfKey: await store.putBlob(blob), size: blob.size,
+    pages: pages.map(({ w, h, img, th, text }) => ({ w, h, img, th, text })),
   };
   archive.unshift(entry);
   await store.saveArchive();
   const n = pages.length;
-  pages.forEach((p) => URL.revokeObjectURL(p.url));
   pages.length = 0;
-  store.save();
+  await store.saveList();
   updateCount();
+  busy(null);
 
   lastPdf = entry;
-  download();
+  download(entry, blob);
   $('#doneTitle').textContent = section === 'text' ? `${n} sahifali matnli PDF tayyor` : `${n} sahifali PDF tayyor`;
   $('#doneName').value = name;
   setState('done');
 }
 
-// ---------------------------------------------------------------- Arxiv
-let archive = [];                 // {id, name, date, section, pdf, pages: [{blob, w, h, text}]}
+let fontCache = null;
+async function loadFont() {
+  // Kirill va o'zbek harflari (oʻ, gʻ) uchun shrift — faqat matnli PDF kerak bo'lganda yuklanadi
+  if (!fontCache) {
+    const res = await fetch('https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf');
+    if (!res.ok) throw new Error('shrift yuklanmadi');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    fontCache = bin;
+  }
+  return fontCache;
+}
 
+async function buildTextPdf() {
+  const { jsPDF } = window.jspdf;
+  busy('Shrift yuklanmoqda…', 0);
+  const font = await loadFont();
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  doc.addFileToVFS('DejaVuSans.ttf', font);
+  doc.addFont('DejaVuSans.ttf', 'DejaVu', 'normal');
+  doc.setFont('DejaVu', 'normal');
+
+  const W = 210, H = 297, M = 20, size = 12;
+  const lineH = size * 0.3528 * 1.45;                       // pt → mm, qator oralig'i 1.45
+  doc.setFontSize(size);
+  for (const [i, p] of pages.entries()) {
+    if (i > 0) doc.addPage();
+    let y = M + lineH;
+    const paragraphs = (p.text || '').split(/\n\s*\n/);
+    paragraphs.forEach((par, k) => {
+      const lines = doc.splitTextToSize(par.replace(/\n/g, ' '), W - 2 * M);
+      for (const line of lines) {
+        if (y > H - M) { doc.addPage(); y = M + lineH; }
+        doc.text(line, M, y);
+        y += lineH;
+      }
+      if (k < paragraphs.length - 1) y += lineH * 0.6;     // xatboshilar orasida bo'shliq
+    });
+    // pastda kitobdagi sahifa raqami
+    doc.setFontSize(9);
+    doc.setTextColor(150);
+    doc.text(`— ${i + 1} —`, W / 2, H - 10, { align: 'center' });
+    doc.setTextColor(0);
+    doc.setFontSize(size);
+    if (i % 10 === 0) { busy(`PDF: ${i + 1} / ${pages.length} sahifa`, (i + 1) / pages.length); await tick(); }
+  }
+  busy('PDF yakunlanmoqda…', 1);
+  await tick();
+  return doc.output('blob');
+}
+
+// JPEG sarlavhasidan rang kanallari sonini o'qiydi (1 — kulrang, 3 — rangli)
+async function jpegComponents(blob) {
+  const b = new Uint8Array(await blob.slice(0, 65536).arrayBuffer());
+  for (let i = 2; i < b.length - 9;) {
+    if (b[i] !== 0xff) { i++; continue; }
+    const m = b[i + 1];
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return b[i + 9];
+    i += 2 + ((b[i + 2] << 8) | b[i + 3]);
+  }
+  return 3;
+}
+
+async function shrink(blob, q) {
+  const bmp = await createImageBitmap(blob);
+  const s = Math.min(1, q.dim / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close && bmp.close();
+  const out = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', q.q));
+  return { blob: out, w: c.width, h: c.height };
+}
+
+// Rasmli PDF'ni qo'lda yozamiz: JPEG'lar PDF ichiga to'g'ridan-to'g'ri qo'yiladi va
+// hammasi xotiraga yuklanmaydi — 500 sahifali kitob ham telefonda yig'iladi.
+async function buildImagePdf(quality) {
+  const q = QUALITY[quality] || QUALITY.high;
+  const enc = new TextEncoder();
+  const parts = [], offsets = [];
+  let pos = 0;
+  const add = (x) => {
+    if (typeof x === 'string') x = enc.encode(x);
+    parts.push(x);
+    pos += x.size !== undefined ? x.size : x.length;
+  };
+  const obj = (n, body) => { offsets[n] = pos; add(`${n} 0 obj\n${body}\nendobj\n`); };
+
+  const n = pages.length;
+  // 1 — katalog, 2 — sahifalar ro'yxati, keyin har sahifa uchun 3 ta obyekt
+  const pageObj = (i) => 3 + i * 3;
+  add('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, `<< /Type /Pages /Count ${n} /Kids [${pages.map((_, i) => `${pageObj(i)} 0 R`).join(' ')}] >>`);
+
+  for (const [i, p] of pages.entries()) {
+    let blob = await store.getBlob(p.img), w = p.w, h = p.h;
+    if (!blob) throw new Error(`${i + 1}-sahifa rasmi topilmadi`);
+    if (q.dim && Math.max(w, h) > q.dim) ({ blob, w, h } = await shrink(blob, q));
+    const comps = await jpegComponents(blob);
+    const cs = comps === 1 ? '/DeviceGray' : comps === 4 ? '/DeviceCMYK /Decode [1 0 1 0 1 0 1 0]' : '/DeviceRGB';
+
+    const PW = 595.28, PH = +(PW * h / w).toFixed(2);       // eni A4, bo'yi sahifaga mos
+    const k = pageObj(i);
+    const content = `q ${PW} 0 0 ${PH} 0 0 cm /Im0 Do Q`;
+    obj(k, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im0 ${k + 2} 0 R >> >> /Contents ${k + 1} 0 R >>`);
+    obj(k + 1, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+    offsets[k + 2] = pos;
+    add(`${k + 2} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace ${cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${blob.size} >>\nstream\n`);
+    add(blob);
+    add('\nendstream\nendobj\n');
+
+    if (i % 5 === 0 || i === n - 1) { busy(`PDF: ${i + 1} / ${n} sahifa`, (i + 1) / n); await tick(); }
+  }
+
+  const total = 3 + n * 3;
+  const xref = pos;
+  let x = `xref\n0 ${total}\n0000000000 65535 f \n`;
+  for (let i = 1; i < total; i++) x += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+  add(x + `trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts, { type: 'application/pdf' });
+}
+
+async function copyAllText() {
+  const src = lastPdf ? lastPdf.pages : pages;
+  const all = src.map((p) => p.text || '').filter(Boolean).join('\n\n');
+  try { await navigator.clipboard.writeText(all); toast('Butun matn nusxalandi'); }
+  catch (e) { toast('Nusxalab bo‘lmadi'); }
+}
+
+async function pdfBlob(entry) { return store.getBlob(entry.pdfKey); }
+
+async function download(entry = lastPdf, blob) {
+  if (!entry) return;
+  blob = blob || await pdfBlob(entry);
+  if (!blob) { toast('PDF fayli topilmadi'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = entry.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  toast(`Yuklandi: ${entry.name}`);
+}
+
+function renamedPdf() {
+  if (lastPdf) {
+    lastPdf.name = cleanName($('#doneName').value) + '.pdf';
+    store.saveArchive();
+  }
+  return lastPdf;
+}
+
+async function share(entry) {
+  const pdf = entry || renamedPdf();
+  const file = new File([await pdfBlob(pdf)], pdf.name, { type: 'application/pdf' });
+  try { await navigator.share({ files: [file], title: pdf.name }); } catch (e) { /* bekor qilindi */ }
+}
+
+function newBook() {
+  renamedPdf();
+  lastPdf = null;
+  backToLive();
+}
+
+// ---------------------------------------------------------------- Arxiv
 function openArchive() {
   renderArchive();
   setState('archive');
+  showStorage();
+}
+
+async function showStorage() {
+  const el = $('#storageInfo');
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    el.textContent = `Band qilingan joy: ${fmtSize(usage)} (bo‘sh: ~${fmtSize(quota - usage)})`;
+  } catch (e) { el.textContent = ''; }
+}
+
+function fmtSize(bytes) {
+  const kb = bytes / 1024;
+  if (kb < 1024) return Math.round(kb) + ' KB';
+  if (kb < 1024 * 1024) return (kb / 1024).toFixed(1) + ' MB';
+  return (kb / 1024 / 1024).toFixed(1) + ' GB';
 }
 
 function fmtDate(t) {
@@ -636,6 +1032,7 @@ function fmtDate(t) {
 
 function renderArchive() {
   const list = $('#archiveList');
+  list.querySelectorAll('img').forEach((i) => lazy.unobserve(i));
   list.innerHTML = '';
   if (!archive.length) {
     list.innerHTML = '<div class="empty">Arxiv hozircha bo‘sh. PDF yaratganingizda u sahifalari bilan shu yerga tushadi.</div>';
@@ -643,13 +1040,12 @@ function renderArchive() {
   for (const e of archive) {
     const el = document.createElement('div');
     el.className = 'acard';
-    const kb = Math.round(e.pdf.size / 1024);
     el.innerHTML = `
       <div class="ahead">
         <div class="aicon">${e.section === 'text' ? '📝' : '🖼'}</div>
         <div class="ainfo">
           <div class="aname"></div>
-          <div class="ameta">${fmtDate(e.date)} · ${e.pages.length} sahifa · ${kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB'} · ${e.section === 'text' ? 'Matnli' : 'Rasmli'}</div>
+          <div class="ameta">${fmtDate(e.date)} · ${e.pages.length} sahifa · ${fmtSize(e.size || 0)} · ${e.section === 'text' ? 'Matnli' : 'Rasmli'}</div>
         </div>
       </div>
       <div class="aacts">
@@ -681,12 +1077,12 @@ async function archiveAction(e, act, el) {
     const box = el.querySelector('.athumbs');
     if (box.hidden && !box.childElementCount) {
       e.pages.forEach((p, i) => {
-        const url = URL.createObjectURL(p.blob);
         const t = document.createElement('div');
         t.className = 'athumb';
-        t.innerHTML = `<img src="${url}" alt="${i + 1}-sahifa"><span>${i + 1}</span>`;
+        t.innerHTML = `<img alt="${i + 1}-sahifa"><span>${i + 1}</span>`;
         if (p.text) t.title = p.text.slice(0, 300);
-        t.onclick = () => showViewer(url);
+        lazyImg(t.querySelector('img'), p.th);
+        t.onclick = () => showViewer(p.img);
         box.appendChild(t);
       });
     }
@@ -695,10 +1091,10 @@ async function archiveAction(e, act, el) {
     const book = books[e.section];
     if (book.length && !confirm(`Hozirgi ish ro‘yxatida ${book.length} ta sahifa bor. Arxivdagi sahifalar ularning oxiriga qo‘shilsinmi?`)) return;
     book.push(...e.pages.map((p, i) => ({
-      ...p, id: Date.now() + i + Math.random(), url: URL.createObjectURL(p.blob),
+      ...p, id: Date.now() + i + Math.random(),
       ...(e.section === 'text' ? { status: 'done' } : {}),
     })));
-    store.save(e.section);
+    await store.saveList(e.section);
     switchSection(e.section);
     updateCount();
     toast(`${e.pages.length} ta sahifa tahrirga olindi. PDF arxivda ham qoladi`);
@@ -708,109 +1104,11 @@ async function archiveAction(e, act, el) {
     archive.splice(archive.indexOf(e), 1);
     if (lastPdf === e) lastPdf = null;
     await store.saveArchive();
+    await store.gc();
     renderArchive();
     updateCount();
+    showStorage();
   }
-}
-
-let fontCache = null;
-async function loadFont() {
-  // Kirill va o'zbek harflari (oʻ, gʻ) uchun shrift — faqat matnli PDF kerak bo'lganda yuklanadi
-  if (!fontCache) {
-    const res = await fetch('https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans.ttf');
-    if (!res.ok) throw new Error('shrift yuklanmadi');
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    let bin = '';
-    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    fontCache = bin;
-  }
-  return fontCache;
-}
-
-async function buildTextPdf() {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
-  doc.addFileToVFS('DejaVuSans.ttf', await loadFont());
-  doc.addFont('DejaVuSans.ttf', 'DejaVu', 'normal');
-  doc.setFont('DejaVu', 'normal');
-
-  const W = 210, H = 297, M = 20, size = 12;
-  const lineH = size * 0.3528 * 1.45;                       // pt → mm, qator oralig'i 1.45
-  doc.setFontSize(size);
-  pages.forEach((p, i) => {
-    if (i > 0) doc.addPage();
-    let y = M + lineH;
-    const paragraphs = (p.text || '').split(/\n\s*\n/);
-    paragraphs.forEach((par, k) => {
-      const lines = doc.splitTextToSize(par.replace(/\n/g, ' '), W - 2 * M);
-      for (const line of lines) {
-        if (y > H - M) { doc.addPage(); y = M + lineH; }
-        doc.text(line, M, y);
-        y += lineH;
-      }
-      if (k < paragraphs.length - 1) y += lineH * 0.6;     // xatboshilar orasida bo'shliq
-    });
-    // pastda kitobdagi sahifa raqami
-    doc.setFontSize(9);
-    doc.setTextColor(150);
-    doc.text(`— ${i + 1} —`, W / 2, H - 10, { align: 'center' });
-    doc.setTextColor(0);
-    doc.setFontSize(size);
-  });
-  return doc.output('blob');
-}
-
-async function buildImagePdf() {
-  const { jsPDF } = window.jspdf;
-  let doc;
-  for (const [i, p] of pages.entries()) {
-    const w = 210, h = (210 * p.h) / p.w;                 // eni A4 (210 mm)
-    const orient = h >= w ? 'p' : 'l';
-    if (i === 0) doc = new jsPDF({ unit: 'mm', format: [w, h], orientation: orient, compress: true });
-    else doc.addPage([w, h], orient);
-    const bytes = new Uint8Array(await p.blob.arrayBuffer());
-    doc.addImage(bytes, 'JPEG', 0, 0, w, h, undefined, 'FAST');
-  }
-  return doc.output('blob');
-}
-
-async function copyAllText() {
-  const src = lastPdf ? lastPdf.pages : pages;
-  const all = src.map((p) => p.text || '').filter(Boolean).join('\n\n');
-  try { await navigator.clipboard.writeText(all); toast('Butun matn nusxalandi'); }
-  catch (e) { toast('Nusxalab bo‘lmadi'); }
-}
-
-function download(entry = lastPdf) {
-  if (!entry) return;
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(entry.pdf);
-  a.download = entry.name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-  toast(`Yuklandi: ${entry.name}`);
-}
-
-function renamedPdf() {
-  if (lastPdf) {
-    lastPdf.name = cleanName($('#doneName').value) + '.pdf';
-    store.saveArchive();
-  }
-  return lastPdf;
-}
-
-async function share(entry) {
-  const pdf = entry || renamedPdf();
-  const file = new File([pdf.pdf], pdf.name, { type: 'application/pdf' });
-  try { await navigator.share({ files: [file], title: pdf.name }); } catch (e) { /* bekor qilindi */ }
-}
-
-function newBook() {
-  renamedPdf();
-  lastPdf = null;
-  backToLive();
 }
 
 // ---------------------------------------------------------------- Yordamchilar
@@ -821,7 +1119,7 @@ function setState(s) {
 function updateCount() {
   $('#count').textContent = `${pages.length} sahifa`;
   $('#galleryCount').textContent = pages.length;
-  const wait = section === 'text' ? waitingCount() : 0;
+  const wait = waitingCount();
   $('#galleryLabel').textContent = section === 'text'
     ? (wait ? `📝 Matnlar (o‘qilmoqda: ${wait})` : '📝 Matnlar')
     : '🖼 Sahifalar';
@@ -862,8 +1160,8 @@ $('#sections').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (b) switchSection(b.dataset.section);
 });
-$('#lang').onchange = () => { try { localStorage.setItem('kitob-lang', langCode()); } catch (e) { /* */ } };
-try { const l = localStorage.getItem('kitob-lang'); if (l) $('#lang').value = l; } catch (e) { /* */ }
+try { const l = localStorage.getItem('kitob-lang2'); if (l && [...$('#lang').options].some((o) => o.value === l)) $('#lang').value = l; } catch (e) { /* */ }
+$('#lang').onchange = onLangChange;
 $('#switchCam').onclick = () => { facing = facing === 'environment' ? 'user' : 'environment'; startCamera(); };
 if (navigator.canShare && navigator.canShare({ files: [new File([''], 'a.pdf', { type: 'application/pdf' })] })) {
   $('#share').hidden = false;
@@ -879,7 +1177,7 @@ $('#modes').addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   const s = app.dataset.state;
   if (e.code === 'Space' && s === 'live') { e.preventDefault(); capture(); }
   else if (e.key === 'Enter' && s === 'review') $('#next').click();
@@ -887,9 +1185,13 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && (!stream || !stream.active)) startCamera();
+  if (document.visibilityState !== 'visible') return;
+  keepAwake();
+  if (!stream || !stream.active) startCamera();
 });
+
 
 restorePages();
 startCamera();
+keepAwake();
 liveLoop();
