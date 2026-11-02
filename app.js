@@ -13,10 +13,10 @@ const JPEG_Q = 0.88;
 let cvReady = false;
 let stream = null, facing = 'environment';
 let mode = 'gray';
-let pages = [];                  // {url, w, h}
+let pages = [];                  // {id, blob, url, w, h} — saqlangan sahifalar
 let raw = null, rawQuad = null, rotation = 0, current = null;
 let lastQuad = null, prevQuad = null, stableSince = 0, cooldownUntil = 0;
-let lastPdf = null;
+let lastPdf = null;               // {blob, name}
 
 // ---------------------------------------------------------------- OpenCV
 async function onOpenCvLoaded() {
@@ -264,7 +264,44 @@ function handleAuto(quad) {
   if (held >= AUTO_STABLE_MS) { stableSince = 0; capture(); }
 }
 
-// ---------------------------------------------------------------- Tugmalar
+
+// ---------------------------------------------------------------- Saqlash (sahifa yangilansa ham yo'qolmaydi)
+const store = {
+  db: null,
+  async open() {
+    if (this.db || !window.indexedDB) return this.db;
+    this.db = await new Promise((ok, fail) => {
+      const req = indexedDB.open('kitob-skaner', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('kv');
+      req.onsuccess = () => ok(req.result);
+      req.onerror = () => fail(req.error);
+    }).catch(() => null);
+    return this.db;
+  },
+  async run(fn) {
+    const db = await this.open();
+    if (!db) return null;
+    return new Promise((ok) => {
+      const tx = db.transaction('kv', 'readwrite'), req = fn(tx.objectStore('kv'));
+      tx.oncomplete = () => ok(req && req.result);
+      tx.onerror = () => ok(null);
+    });
+  },
+  save() {
+    return this.run((s) => s.put(pages.map(({ id, blob, w, h }) => ({ id, blob, w, h })), 'pages'));
+  },
+  load() { return this.run((s) => s.get('pages')); },
+};
+
+async function restorePages() {
+  const saved = await store.load();
+  if (!saved || !saved.length) return;
+  pages = saved.map((p) => ({ ...p, url: URL.createObjectURL(p.blob) }));
+  updateCount();
+  toast(`Oldingi ${pages.length} ta sahifa tiklandi`);
+}
+
+// ---------------------------------------------------------------- Suratga olish
 function capture() {
   if (app.dataset.state !== 'live' || !video.videoWidth) return;
   const vw = video.videoWidth, vh = video.videoHeight;
@@ -285,11 +322,15 @@ function render() {
   result.src = current.toDataURL('image/jpeg', JPEG_Q);
 }
 
-function accept() {
+async function savePage() {
   if (!current) return;
-  pages.push({ url: current.toDataURL('image/jpeg', JPEG_Q), w: current.width, h: current.height });
+  const c = current;
   current = null; raw = null;
+  const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', JPEG_Q));
+  pages.push({ id: Date.now() + Math.random(), blob, url: URL.createObjectURL(blob), w: c.width, h: c.height });
+  lastPdf = null;
   updateCount();
+  store.save();
 }
 
 function backToLive() {
@@ -298,43 +339,141 @@ function backToLive() {
   setState('live');
 }
 
-function finish() {
-  if (app.dataset.state === 'review') accept();
-  if (!pages.length) { toast('Hali birorta ham sahifa olinmagan'); backToLive(); return; }
+// ---------------------------------------------------------------- Sahifalar galereyasi
+function openGallery() {
+  renderGallery();
+  setState('gallery');
+}
 
+function renderGallery() {
+  const grid = $('#grid');
+  grid.innerHTML = '';
+  if (!pages.length) {
+    grid.innerHTML = '<div class="empty">Hali sahifa yo‘q. «Davom ettirish»ni bosib, sahifalarni suratga oling.</div>';
+  }
+  pages.forEach((p, i) => {
+    const el = document.createElement('div');
+    el.className = 'thumb';
+    el.innerHTML = `<img src="${p.url}" alt="${i + 1}-sahifa"><span class="num">${i + 1}</span>
+      <div class="acts">
+        <button data-act="left" title="Oldinga" ${i === 0 ? 'disabled' : ''}>◀</button>
+        <button data-act="del" class="del" title="O‘chirish">🗑</button>
+        <button data-act="right" title="Orqaga" ${i === pages.length - 1 ? 'disabled' : ''}>▶</button>
+      </div>`;
+    el.querySelector('img').onclick = () => showViewer(p.url);
+    el.querySelector('.acts').onclick = (e) => {
+      const act = e.target.closest('button')?.dataset.act;
+      if (!act) return;
+      if (act === 'del') {
+        if (!confirm(`${i + 1}-sahifani o‘chirasizmi?`)) return;
+        URL.revokeObjectURL(p.url);
+        pages.splice(i, 1);
+      } else {
+        const j = act === 'left' ? i - 1 : i + 1;
+        [pages[i], pages[j]] = [pages[j], pages[i]];
+      }
+      lastPdf = null;
+      updateCount();
+      store.save();
+      renderGallery();
+    };
+    grid.appendChild(el);
+  });
+  $('#makePdf').disabled = !pages.length;
+}
+
+function showViewer(url) {
+  const v = $('#viewer');
+  v.querySelector('img').src = url;
+  v.classList.add('show');
+}
+$('#viewer').onclick = () => $('#viewer').classList.remove('show');
+
+// ---------------------------------------------------------------- PDF
+function defaultName() {
+  const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+  return `Kitob_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}`;
+}
+
+function cleanName(s) {
+  const n = s.trim().replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120);
+  return n || defaultName();
+}
+
+function askPdfName() {
+  if (!pages.length) { toast('Hali birorta ham sahifa saqlanmagan'); return; }
+  const dlg = $('#pdfDialog');
+  $('#dialogInfo').textContent = `${pages.length} ta sahifa bitta PDF faylga yig‘iladi.`;
+  $('#pdfName').value = lastPdf ? lastPdf.name.replace(/\.pdf$/, '') : defaultName();
+  dlg.returnValue = '';
+  dlg.showModal();
+  setTimeout(() => $('#pdfName').select(), 50);
+}
+
+$('#pdfDialog').addEventListener('close', () => {
+  if ($('#pdfDialog').returnValue === 'ok') makePdf(cleanName($('#pdfName').value));
+});
+
+async function makePdf(name) {
+  toast('PDF tayyorlanmoqda…');
   const { jsPDF } = window.jspdf;
   let doc;
-  pages.forEach((p, i) => {
+  for (const [i, p] of pages.entries()) {
     const w = 210, h = (210 * p.h) / p.w;                 // eni A4 (210 mm)
     const orient = h >= w ? 'p' : 'l';
     if (i === 0) doc = new jsPDF({ unit: 'mm', format: [w, h], orientation: orient, compress: true });
     else doc.addPage([w, h], orient);
-    doc.addImage(p.url, 'JPEG', 0, 0, w, h, undefined, 'FAST');
-  });
-  const d = new Date(), pad = (n) => String(n).padStart(2, '0');
-  const name = `Kitob_${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}.pdf`;
-  lastPdf = { doc, name };
-  doc.save(name);
-
-  result.src = pages[pages.length - 1].url;
+    const bytes = new Uint8Array(await p.blob.arrayBuffer());
+    doc.addImage(bytes, 'JPEG', 0, 0, w, h, undefined, 'FAST');
+  }
+  lastPdf = { blob: doc.output('blob'), name: name + '.pdf' };
+  download();
+  $('#doneTitle').textContent = `${pages.length} sahifali PDF tayyor`;
+  $('#doneName').value = name;
   setState('done');
-  setMsg(`✔ ${pages.length} sahifali PDF tayyor: ${name}`);
+}
+
+function download() {
+  if (!lastPdf) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(lastPdf.blob);
+  a.download = lastPdf.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  toast(`Yuklandi: ${lastPdf.name}`);
+}
+
+function renamedPdf() {
+  if (lastPdf) lastPdf.name = cleanName($('#doneName').value) + '.pdf';
+  return lastPdf;
+}
+
+async function share() {
+  const pdf = renamedPdf();
+  const file = new File([pdf.blob], pdf.name, { type: 'application/pdf' });
+  try { await navigator.share({ files: [file], title: pdf.name }); } catch (e) { /* bekor qilindi */ }
 }
 
 function newBook() {
+  if (pages.length && !confirm('Barcha saqlangan sahifalar o‘chiriladi. Yangi kitobni boshlaysizmi?')) return;
+  pages.forEach((p) => URL.revokeObjectURL(p.url));
   pages = []; lastPdf = null;
   updateCount();
-  setMsg('');
+  store.save();
   backToLive();
 }
 
 // ---------------------------------------------------------------- Yordamchilar
 function setState(s) {
   app.dataset.state = s;
-  $('#finishLive').disabled = !pages.length;
   if (s === 'live') { setMsg(''); drawOverlay(null); }
 }
-function updateCount() { $('#count').textContent = `${pages.length} sahifa`; }
+function updateCount() {
+  $('#count').textContent = `${pages.length} sahifa`;
+  $('#galleryCount').textContent = pages.length;
+}
 function setMsg(t) { msg.textContent = t; msg.dataset.kind = ''; }
 function toast(t) {
   const el = $('#toast');
@@ -342,20 +481,30 @@ function toast(t) {
   clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 2600);
 }
 function flash() {
-  const st = $('#stage');
-  st.animate([{ background: '#fff' }, { background: '#0c0c0f' }], { duration: 250 });
+  $('#stage').animate([{ background: '#fff' }, { background: '#0c0c0f' }], { duration: 250 });
 }
 
 // ---------------------------------------------------------------- Hodisalar
 $('#shutter').onclick = capture;
-$('#next').onclick = () => { accept(); backToLive(); toast(`${pages.length}-sahifa saqlandi. Keyingisini ko‘rsating`); };
+$('#next').onclick = async () => {
+  await savePage();
+  backToLive();
+  toast(`${pages.length}-sahifa saqlandi. Keyingisini ko‘rsating`);
+};
 $('#retake').onclick = () => { current = null; raw = null; backToLive(); };
 $('#rotate').onclick = () => { rotation = (rotation + 1) % 4; render(); };
-$('#finish').onclick = finish;
-$('#finishLive').onclick = finish;
-$('#download').onclick = () => lastPdf && lastPdf.doc.save(lastPdf.name);
+$('#openGallery').onclick = openGallery;
+$('#count').onclick = () => app.dataset.state === 'live' && openGallery();
+$('#backToCam').onclick = backToLive;
+$('#makePdf').onclick = askPdfName;
+$('#download').onclick = () => { renamedPdf(); download(); };
+$('#doneBack').onclick = openGallery;
 $('#newBook').onclick = newBook;
 $('#switchCam').onclick = () => { facing = facing === 'environment' ? 'user' : 'environment'; startCamera(); };
+if (navigator.canShare && navigator.canShare({ files: [new File([''], 'a.pdf', { type: 'application/pdf' })] })) {
+  $('#share').hidden = false;
+  $('#share').onclick = share;
+}
 
 $('#modes').addEventListener('click', (e) => {
   const b = e.target.closest('button');
@@ -366,19 +515,17 @@ $('#modes').addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
   const s = app.dataset.state;
   if (e.code === 'Space' && s === 'live') { e.preventDefault(); capture(); }
   else if (e.key === 'Enter' && s === 'review') $('#next').click();
   else if (e.key === 'Escape' && s === 'review') $('#retake').click();
 });
 
-window.addEventListener('beforeunload', (e) => {
-  if (pages.length && !lastPdf) { e.preventDefault(); e.returnValue = ''; }
-});
-
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && (!stream || !stream.active)) startCamera();
 });
 
+restorePages();
 startCamera();
 liveLoop();

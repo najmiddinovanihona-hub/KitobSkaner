@@ -28,28 +28,64 @@
     <canvas id="overlay"></canvas>
     <img id="result" alt="Skanerlangan sahifa">
     <div id="progress"></div>
+
+    <section id="gallery" class="panel">
+      <h2>Saqlangan sahifalar</h2>
+      <p class="hint">Sahifalarni o‘chirish yoki ◀ ▶ bilan tartibini o‘zgartirish mumkin. Tayyor bo‘lsa, «PDF yaratish»ni bosing.</p>
+      <div id="grid" class="grid"></div>
+    </section>
+
+    <section id="donePanel" class="panel center">
+      <div class="done-icon">✔</div>
+      <h2 id="doneTitle">PDF tayyor</h2>
+      <label class="field">PDF nomi
+        <span class="name-row"><input id="doneName" type="text" autocomplete="off"><span>.pdf</span></span>
+      </label>
+      <p class="hint">Nomni o‘zgartirib, «Qayta yuklash»ni bossangiz, PDF yangi nom bilan yuklanadi.</p>
+    </section>
+
     <div id="msg" class="msg"></div>
   </main>
 
   <footer>
     <div class="bar live-only">
-      <button id="finishLive" class="btn blue" disabled>✔ Tugatish (PDF)</button>
+      <button id="openGallery" class="btn">🖼 Sahifalar <b id="galleryCount">0</b></button>
       <button id="shutter" class="shutter" aria-label="Nusxa olish"></button>
       <button id="switchCam" class="btn">🔄 Kamera</button>
     </div>
     <div class="bar review-only">
       <button id="retake" class="btn">↺ Qayta olish</button>
       <button id="rotate" class="btn">⟳ Burish</button>
-      <button id="next" class="btn green big">▶ Keyingi sahifa</button>
-      <button id="finish" class="btn blue big">✔ Tugatish (PDF)</button>
+      <button id="next" class="btn green big">✔ Saqlash va keyingi</button>
+    </div>
+    <div class="bar gallery-only">
+      <button id="backToCam" class="btn big">📷 Davom ettirish</button>
+      <button id="makePdf" class="btn blue big">📄 PDF yaratish</button>
     </div>
     <div class="bar done-only">
-      <button id="download" class="btn blue big">⬇ PDF ni qayta yuklash</button>
+      <button id="download" class="btn blue big">⬇ Qayta yuklash</button>
+      <button id="share" class="btn big" hidden>↗ Ulashish</button>
+      <button id="doneBack" class="btn big">🖼 Sahifalar</button>
       <button id="newBook" class="btn green big">＋ Yangi kitob</button>
     </div>
   </footer>
 </div>
 
+<dialog id="pdfDialog">
+  <form method="dialog">
+    <h2>PDF yaratish</h2>
+    <p id="dialogInfo" class="hint"></p>
+    <label class="field">Fayl nomi
+      <span class="name-row"><input id="pdfName" type="text" autocomplete="off" required><span>.pdf</span></span>
+    </label>
+    <div class="dialog-buttons">
+      <button value="cancel" class="btn" formnovalidate>Bekor qilish</button>
+      <button value="ok" class="btn blue">📄 Yaratish</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="viewer"><img alt="Sahifa"></div>
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>

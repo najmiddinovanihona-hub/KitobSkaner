@@ -21,15 +21,52 @@ header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 #progress { position: absolute; left: 0; bottom: 0; height: 6px; width: 0; background: #3cdc5a; }
 .msg { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); max-width: 90%;
   background: rgba(0,0,0,.65); padding: 8px 14px; border-radius: 10px; font-size: 14px; text-align: center; }
-.msg:empty { display: none; }
+.msg:empty, #app:not([data-state="live"]) .msg:not(.keep) { display: none; }
 .msg button { margin-top: 8px; }
 
 footer { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); background: #1f1f26; }
 .bar { display: none; gap: 10px; align-items: center; justify-content: center; }
-[data-state="live"] .live-only, [data-state="review"] .review-only, [data-state="done"] .done-only { display: flex; }
-[data-state="review"] #video, [data-state="review"] #overlay,
-[data-state="done"] #video, [data-state="done"] #overlay { visibility: hidden; }
-[data-state="review"] #result, [data-state="done"] #result { display: block; }
+[data-state="live"] .live-only, [data-state="review"] .review-only,
+[data-state="gallery"] .gallery-only, [data-state="done"] .done-only { display: flex; }
+#app:not([data-state="live"]) #video, #app:not([data-state="live"]) #overlay { visibility: hidden; }
+[data-state="review"] #result { display: block; }
+[data-state="gallery"] #gallery, [data-state="done"] #donePanel { display: block; }
+
+.panel { display: none; position: absolute; inset: 0; overflow-y: auto; padding: 16px; background: #16161b; }
+.panel h2 { font-size: 18px; margin-bottom: 6px; }
+.panel.center { text-align: center; padding-top: 40px; }
+.panel.center .field { max-width: 420px; margin: 18px auto 0; text-align: left; }
+.hint { color: #9a9aa8; font-size: 13px; line-height: 1.45; margin: 6px 0 14px; }
+.done-icon { width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 50%; background: #2e7d32;
+  display: grid; place-items: center; font-size: 32px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+.thumb { position: relative; background: #24242c; border-radius: 10px; overflow: hidden; }
+.thumb img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #0c0c0f; cursor: zoom-in; }
+.thumb .num { position: absolute; left: 6px; top: 6px; background: rgba(0,0,0,.7); padding: 2px 8px;
+  border-radius: 8px; font-size: 12px; font-weight: 700; }
+.thumb .acts { display: flex; }
+.thumb .acts button { flex: 1; border: 0; background: none; color: #ececf1; padding: 8px 0; font-size: 15px; cursor: pointer; }
+.thumb .acts button:hover { background: #34343f; }
+.thumb .acts button:disabled { opacity: .25; }
+.thumb .acts .del { color: #ff7b7b; }
+.empty { color: #9a9aa8; text-align: center; padding: 40px 0; grid-column: 1 / -1; }
+
+.field { display: block; font-size: 13px; color: #b9b9c6; }
+.name-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.name-row input { flex: 1; min-width: 0; padding: 12px; border-radius: 10px; border: 1px solid #44444f;
+  background: #24242c; color: #ececf1; font: inherit; font-size: 16px; }
+.name-row input:focus { outline: 2px solid #1565c0; border-color: transparent; }
+
+dialog { margin: auto; border: 0; border-radius: 16px; padding: 20px; width: min(440px, calc(100% - 32px));
+  background: #1f1f26; color: #ececf1; }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+dialog h2 { font-size: 18px; }
+.dialog-buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+
+#viewer { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; place-items: center; z-index: 10; cursor: zoom-out; }
+#viewer.show { display: grid; }
+#viewer img { max-width: 96vw; max-height: 92vh; }
 
 .btn { border: 0; border-radius: 12px; padding: 13px 16px; font: inherit; font-size: 15px; font-weight: 600;
   background: #34343f; color: #ececf1; cursor: pointer; }
@@ -52,7 +89,9 @@ footer { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); background
 
 @media (max-width: 600px) {
   .brand { width: 100%; }
-  .review-only { flex-wrap: wrap; }
+  .review-only, .done-only { flex-wrap: wrap; }
   .review-only .btn:not(.big) { flex: 1; }
-  .review-only .btn.big { flex-basis: 45%; }
+  .review-only .btn.big { flex-basis: 100%; }
+  .done-only .btn.big { flex-basis: 45%; }
+  .live-only .btn { padding: 13px 10px; font-size: 14px; }
 }
