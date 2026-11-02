@@ -16,6 +16,18 @@ Telefonda ham, kompyuterda ham brauzerda ochiladi, hech narsa o'rnatish shart em
    - **Burish**: sahifani 90° ga buradi.
    - **Tugatish (PDF)**: barcha sahifalarni bitta PDF qilib yuklab beradi.
 
+Sahifalar bittalab saqlanib boradi. PDF faqat **🖼 Sahifalar → 📄 PDF yaratish** bosilganda, siz bergan nom bilan yaratiladi.
+
+## 📝 Matn bo'limi (OCR)
+
+Yuqoridagi **📝 Matn** tugmasini bosing va kitob tilini tanlang: o'zbek (lotin yoki kirill), rus yoki ingliz.
+
+1. Sahifani suratga olib, **Saqlash va keyingi**ni bosing. Sahifadagi matn orqa fonda o'zi o'qib olinadi, siz shu vaqtda keyingi sahifani olishda davom etasiz.
+2. **📝 Matnlar** ro'yxatida har bir sahifaning matni turadi. Xatolarni o'sha yerning o'zida tuzatish mumkin, o'zgarishlar o'zi saqlanadi. **↻** tugmasi sahifani qaytadan o'qiydi.
+3. **📄 PDF yaratish** bosilganda **matnli PDF** chiqadi: undagi matnni belgilab nusxa olish va qidirish mumkin. **📋 Matnni nusxalash** tugmasi butun matnni nusxalaydi.
+
+Birinchi marta matn o'qilayotganda til ma'lumotlari (bir necha MB) yuklanadi, keyingi safar tezroq ishlaydi.
+
 ## Sozlamalar (yuqori panel)
 
 - **Rangli / Kulrang / Oq-qora**: rasmli kitoblar uchun Rangli, matn uchun Kulrang, eng kichik fayl uchun Oq-qora.

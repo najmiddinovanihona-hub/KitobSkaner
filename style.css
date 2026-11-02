@@ -64,6 +64,30 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
 dialog h2 { font-size: 18px; }
 .dialog-buttons { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 
+[data-section="image"] .text-only, [data-section="text"] .image-only { display: none !important; }
+.sections button { font-weight: 600; }
+#lang { background: #2b2b34; color: #ececf1; border: 0; border-radius: 10px; padding: 8px 10px; font: inherit; font-size: 13px; }
+
+.grid.list { grid-template-columns: 1fr; }
+.tcard { display: flex; gap: 12px; background: #24242c; border-radius: 12px; padding: 10px; }
+.tcard .side { width: 96px; flex: none; display: flex; flex-direction: column; gap: 6px; }
+.tcard .side img { width: 96px; aspect-ratio: 3 / 4; object-fit: contain; background: #0c0c0f; border-radius: 8px; cursor: zoom-in; }
+.tcard .side .acts { display: flex; flex-wrap: wrap; }
+.tcard .side .acts button { flex: 1 0 30%; border: 0; background: none; color: #ececf1; padding: 6px 0; font-size: 15px; cursor: pointer; border-radius: 6px; }
+.tcard .side .acts button:hover { background: #34343f; }
+.tcard .side .acts button:disabled { opacity: .25; }
+.tcard .side .acts .del { color: #ff7b7b; }
+.tcard .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.tcard .head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 700; }
+.tcard .status { font-weight: 500; color: #9a9aa8; font-size: 12px; }
+.tcard .status.err { color: #ff7b7b; }
+.tcard textarea { flex: 1; min-height: 150px; resize: vertical; width: 100%; padding: 10px; border-radius: 8px;
+  border: 1px solid #3a3a45; background: #16161b; color: #ececf1; font: 14px/1.5 Georgia, "Times New Roman", serif; }
+.tcard textarea:focus { outline: 2px solid #1565c0; border-color: transparent; }
+.tcard textarea:disabled { opacity: .5; }
+.bar-mini { height: 4px; background: #34343f; border-radius: 2px; overflow: hidden; }
+.bar-mini i { display: block; height: 100%; background: #3cdc5a; width: 0; transition: width .3s; }
+
 #viewer { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; place-items: center; z-index: 10; cursor: zoom-out; }
 #viewer.show { display: grid; }
 #viewer img { max-width: 96vw; max-height: 92vh; }

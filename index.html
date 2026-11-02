@@ -11,10 +11,20 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="app" data-state="live">
+<div id="app" data-state="live" data-section="image">
   <header>
     <div class="brand">📖 Kitob Skaner</div>
-    <div class="seg" id="modes">
+    <div class="seg sections" id="sections">
+      <button data-section="image" class="on">🖼 Rasm</button>
+      <button data-section="text">📝 Matn</button>
+    </div>
+    <select id="lang" class="text-only" aria-label="Kitob tili">
+      <option value="uzb+eng">O‘zbek (lotin)</option>
+      <option value="uzb_cyrl+rus">Ўзбек (кирилл)</option>
+      <option value="rus+eng">Русский</option>
+      <option value="eng">English</option>
+    </select>
+    <div class="seg image-only" id="modes">
       <button data-mode="color">Rangli</button>
       <button data-mode="gray" class="on">Kulrang</button>
       <button data-mode="bw">Oq-qora</button>
@@ -30,8 +40,10 @@
     <div id="progress"></div>
 
     <section id="gallery" class="panel">
-      <h2>Saqlangan sahifalar</h2>
-      <p class="hint">Sahifalarni o‘chirish yoki ◀ ▶ bilan tartibini o‘zgartirish mumkin. Tayyor bo‘lsa, «PDF yaratish»ni bosing.</p>
+      <h2 class="image-only">Saqlangan sahifalar</h2>
+      <p class="hint image-only">Sahifalarni o‘chirish yoki ◀ ▶ bilan tartibini o‘zgartirish mumkin. Tayyor bo‘lsa, «PDF yaratish»ni bosing.</p>
+      <h2 class="text-only">O‘qilgan matnlar</h2>
+      <p class="hint text-only">Har bir sahifadan o‘qilgan matn shu yerda. Xatolarni to‘g‘ridan-to‘g‘ri tuzatishingiz mumkin, o‘zgarishlar o‘zi saqlanadi. Tayyor bo‘lsa, «PDF yaratish»ni bosing.</p>
       <div id="grid" class="grid"></div>
     </section>
 
@@ -49,7 +61,7 @@
 
   <footer>
     <div class="bar live-only">
-      <button id="openGallery" class="btn">🖼 Sahifalar <b id="galleryCount">0</b></button>
+      <button id="openGallery" class="btn"><span id="galleryLabel">🖼 Sahifalar</span> <b id="galleryCount">0</b></button>
       <button id="shutter" class="shutter" aria-label="Nusxa olish"></button>
       <button id="switchCam" class="btn">🔄 Kamera</button>
     </div>
@@ -65,6 +77,7 @@
     <div class="bar done-only">
       <button id="download" class="btn blue big">⬇ Qayta yuklash</button>
       <button id="share" class="btn big" hidden>↗ Ulashish</button>
+      <button id="copyText" class="btn big text-only">📋 Matnni nusxalash</button>
       <button id="doneBack" class="btn big">🖼 Sahifalar</button>
       <button id="newBook" class="btn green big">＋ Yangi kitob</button>
     </div>
@@ -89,6 +102,7 @@
 <div id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" defer></script>
 <script src="app.js"></script>
 <script async src="https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js" onload="onOpenCvLoaded()" onerror="onOpenCvFailed()"></script>
 </body>
