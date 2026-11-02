@@ -1,0 +1,12 @@
+{
+  "name": "Kitob Skaner",
+  "short_name": "Kitob Skaner",
+  "description": "Kamera orqali kitob sahifalarini nusxalab, PDF qiladi",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#16161b",
+  "theme_color": "#16161b",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

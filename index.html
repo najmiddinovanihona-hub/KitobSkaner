@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16161b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Kitob Skaner</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app" data-state="live">
+  <header>
+    <div class="brand">📖 Kitob Skaner</div>
+    <div class="seg" id="modes">
+      <button data-mode="color">Rangli</button>
+      <button data-mode="gray" class="on">Kulrang</button>
+      <button data-mode="bw">Oq-qora</button>
+    </div>
+    <label class="auto"><input type="checkbox" id="auto"> Avto</label>
+    <div class="count" id="count">0 sahifa</div>
+  </header>
+
+  <main id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="overlay"></canvas>
+    <img id="result" alt="Skanerlangan sahifa">
+    <div id="progress"></div>
+    <div id="msg" class="msg"></div>
+  </main>
+
+  <footer>
+    <div class="bar live-only">
+      <button id="finishLive" class="btn blue" disabled>✔ Tugatish (PDF)</button>
+      <button id="shutter" class="shutter" aria-label="Nusxa olish"></button>
+      <button id="switchCam" class="btn">🔄 Kamera</button>
+    </div>
+    <div class="bar review-only">
+      <button id="retake" class="btn">↺ Qayta olish</button>
+      <button id="rotate" class="btn">⟳ Burish</button>
+      <button id="next" class="btn green big">▶ Keyingi sahifa</button>
+      <button id="finish" class="btn blue big">✔ Tugatish (PDF)</button>
+    </div>
+    <div class="bar done-only">
+      <button id="download" class="btn blue big">⬇ PDF ni qayta yuklash</button>
+      <button id="newBook" class="btn green big">＋ Yangi kitob</button>
+    </div>
+  </footer>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="app.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js" onload="onOpenCvLoaded()" onerror="onOpenCvFailed()"></script>
+</body>
+</html>

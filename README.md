@@ -2,38 +2,36 @@
 
 Kamera orqali kitob sahifalarini birin-ketin nusxalab, bitta PDF faylga yig'ib beradi.
 
-## Ishga tushirish
+**Ilovani ochish:** https://najmiddinovanihona-hub.github.io/KitobSkaner/
 
-`ishga_tushirish.bat` faylini ikki marta bosing. Kerakli kutubxonalar birinchi marta o'zi o'rnatiladi.
-
-Qo'lda ishga tushirish:
-
-```
-pip install -r requirements.txt
-python kitob_skaner.py
-```
+Telefonda ham, kompyuterda ham brauzerda ochiladi, hech narsa o'rnatish shart emas. Ochilganda kameraga ruxsat bering.
 
 ## Ishlatish
 
 1. Kitob sahifasini kameraga ko'rsating. Sahifa topilsa, atrofida **yashil ramka** chiqadi.
-2. **Nusxa olish** tugmasini (yoki **Probel**ni) bosing.
+2. Pastdagi **oq dumaloq tugmani** (kompyuterda **Probel**ni) bosing.
 3. Sahifa kesib olinadi, qiyshiqligi to'g'rilanadi va tozalanadi. Tagida tugmalar chiqadi:
    - **Keyingi sahifa** (Enter): sahifani saqlaydi, siz keyingi sahifani ochasiz.
    - **Qayta olish** (Esc): shu sahifani qaytadan oladi.
    - **Burish**: sahifani 90° ga buradi.
-   - **Tugatish (PDF)**: barcha sahifalarni bitta PDF qilib saqlaydi.
+   - **Tugatish (PDF)**: barcha sahifalarni bitta PDF qilib yuklab beradi.
 
 ## Sozlamalar (yuqori panel)
 
-- **Rejim**:
-  - *Rangli*: rasmli kitoblar uchun.
-  - *Kulrang (toza)*: matn uchun, standart rejim.
-  - *Oq-qora (skaner)*: eng kichik fayl, eng aniq matn.
-- **Avto-olish**: sahifa 1,3 soniya qimirlamay tursa, dastur o'zi suratga oladi. Siz faqat sahifani varaqlab, Enter bosasiz.
-- **Kamera**: `0`, `1`, `2` raqamlari kompyuterdagi kameralarni bildiradi. Telefonni kamera qilish uchun Android'ga **IP Webcam** ilovasini o'rnating va uning manzilini kiriting, masalan `http://192.168.1.5:8080/video`. Telefon kamerasi ancha sifatli tasvir beradi.
+- **Rangli / Kulrang / Oq-qora**: rasmli kitoblar uchun Rangli, matn uchun Kulrang, eng kichik fayl uchun Oq-qora.
+- **Avto**: sahifa 1,3 soniya qimirlamay tursa, ilova o'zi suratga oladi. Siz faqat varaqlab, Enter bosasiz.
+- **🔄 Kamera**: old va orqa kamera orasida almashtiradi.
+
+## Telefonga ilova qilib o'rnatish
+
+Chrome'da sahifani oching, **⋮ → Bosh ekranga qo'shish** ni bosing. Ilova belgisi telefoningiz ekranida paydo bo'ladi.
 
 ## Maslahatlar
 
 - Kitobni **qorong'i fonga** (stol, mato) qo'ying. Shunda sahifa chegarasi oson topiladi.
 - Yorug'lik yaxshi bo'lsin, kamera sahifaga tepadan qarab tursin.
-- Agar sahifa topilmasa (ramka yo'q bo'lsa), dastur butun kadrni oladi.
+- Agar sahifa topilmasa (ramka yo'q bo'lsa), ilova butun kadrni oladi.
+
+## Kompyuter versiyasi (Python)
+
+`desktop/` papkasida Windows uchun alohida dastur bor: `desktop/ishga_tushirish.bat` faylini ikki marta bosing.
