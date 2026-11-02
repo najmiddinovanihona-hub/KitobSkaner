@@ -30,7 +30,28 @@ footer { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); background
 [data-state="gallery"] .gallery-only, [data-state="done"] .done-only { display: flex; }
 #app:not([data-state="live"]) #video, #app:not([data-state="live"]) #overlay { visibility: hidden; }
 [data-state="review"] #result { display: block; }
-[data-state="gallery"] #gallery, [data-state="done"] #donePanel { display: block; }
+[data-state="gallery"] #gallery, [data-state="done"] #donePanel, [data-state="archive"] #archivePanel { display: block; }
+[data-state="archive"] .archive-only { display: flex; }
+
+.archive-btn { border: 0; background: #2b2b34; color: #ececf1; padding: 6px 11px; border-radius: 20px;
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+[data-state="archive"] .archive-btn { background: #ececf1; color: #16161b; }
+.alist { display: flex; flex-direction: column; gap: 12px; }
+.acard { background: #24242c; border-radius: 12px; padding: 12px; }
+.ahead { display: flex; gap: 12px; align-items: center; }
+.aicon { width: 44px; height: 44px; flex: none; border-radius: 10px; background: #1565c0; display: grid; place-items: center; font-size: 22px; }
+.ainfo { min-width: 0; }
+.aname { font-weight: 700; font-size: 15px; overflow-wrap: anywhere; }
+.ameta { color: #9a9aa8; font-size: 12px; margin-top: 3px; }
+.aacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.aacts button { border: 0; background: #34343f; color: #ececf1; padding: 8px 11px; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
+.aacts button:hover { background: #40404c; }
+.aacts .del { color: #ff7b7b; margin-left: auto; }
+.athumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; margin-top: 10px; }
+.athumbs[hidden] { display: none; }
+.athumb { position: relative; cursor: zoom-in; }
+.athumb img { width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #0c0c0f; border-radius: 6px; display: block; }
+.athumb span { position: absolute; left: 4px; top: 4px; background: rgba(0,0,0,.7); font-size: 11px; padding: 1px 6px; border-radius: 6px; }
 
 .panel { display: none; position: absolute; inset: 0; overflow-y: auto; padding: 16px; background: #16161b; }
 .panel h2 { font-size: 18px; margin-bottom: 6px; }

@@ -299,9 +299,13 @@ const store = {
     return this.run((s) => s.put(list, this.key(sec)));
   },
   load(sec) { return this.run((s) => s.get(this.key(sec))); },
+  saveArchive() { return this.run((s) => s.put(archive, 'archive')); },
+  loadArchive() { return this.run((s) => s.get('archive')); },
 };
 
 async function restorePages() {
+  archive = (await store.loadArchive()) || [];
+  updateCount();
   let total = 0;
   for (const sec of ['image', 'text']) {
     const saved = await store.load(sec);
@@ -597,13 +601,116 @@ async function makePdf(name) {
     toast('PDF yaratib bo‘lmadi: ' + (e.message || e));
     return;
   }
-  lastPdf = { blob, name: name + '.pdf' };
+  // PDF va uning sahifalari arxivga tushadi, ish ro'yxati yangi kitob uchun bo'shaydi
+  const entry = {
+    id: Date.now(), name: name + '.pdf', date: Date.now(), section, pdf: blob,
+    pages: pages.map(({ blob: b, w, h, text }) => ({ blob: b, w, h, text })),
+  };
+  archive.unshift(entry);
+  await store.saveArchive();
+  const n = pages.length;
+  pages.forEach((p) => URL.revokeObjectURL(p.url));
+  pages.length = 0;
+  store.save();
+  updateCount();
+
+  lastPdf = entry;
   download();
-  $('#doneTitle').textContent = section === 'text'
-    ? `${pages.length} sahifali matnli PDF tayyor`
-    : `${pages.length} sahifali PDF tayyor`;
+  $('#doneTitle').textContent = section === 'text' ? `${n} sahifali matnli PDF tayyor` : `${n} sahifali PDF tayyor`;
   $('#doneName').value = name;
   setState('done');
+}
+
+// ---------------------------------------------------------------- Arxiv
+let archive = [];                 // {id, name, date, section, pdf, pages: [{blob, w, h, text}]}
+
+function openArchive() {
+  renderArchive();
+  setState('archive');
+}
+
+function fmtDate(t) {
+  const d = new Date(t), pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function renderArchive() {
+  const list = $('#archiveList');
+  list.innerHTML = '';
+  if (!archive.length) {
+    list.innerHTML = '<div class="empty">Arxiv hozircha bo‘sh. PDF yaratganingizda u sahifalari bilan shu yerga tushadi.</div>';
+  }
+  for (const e of archive) {
+    const el = document.createElement('div');
+    el.className = 'acard';
+    const kb = Math.round(e.pdf.size / 1024);
+    el.innerHTML = `
+      <div class="ahead">
+        <div class="aicon">${e.section === 'text' ? '📝' : '🖼'}</div>
+        <div class="ainfo">
+          <div class="aname"></div>
+          <div class="ameta">${fmtDate(e.date)} · ${e.pages.length} sahifa · ${kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB'} · ${e.section === 'text' ? 'Matnli' : 'Rasmli'}</div>
+        </div>
+      </div>
+      <div class="aacts">
+        <button data-act="dl">⬇ Yuklash</button>
+        ${$('#share').hidden ? '' : '<button data-act="share">↗ Ulashish</button>'}
+        <button data-act="rename">✏ Nom</button>
+        <button data-act="view">👁 Sahifalar</button>
+        <button data-act="reopen" title="Sahifalarni qayta tahrirga olish">↩ Tahrirga</button>
+        <button data-act="del" class="del">🗑</button>
+      </div>
+      <div class="athumbs" hidden></div>`;
+    el.querySelector('.aname').textContent = e.name;
+    el.querySelector('.aacts').onclick = (ev) => archiveAction(e, ev.target.closest('button')?.dataset.act, el);
+    list.appendChild(el);
+  }
+}
+
+async function archiveAction(e, act, el) {
+  if (!act) return;
+  if (act === 'dl') download(e);
+  else if (act === 'share') share(e);
+  else if (act === 'rename') {
+    const n = prompt('Yangi nom:', e.name.replace(/\.pdf$/, ''));
+    if (n === null) return;
+    e.name = cleanName(n) + '.pdf';
+    await store.saveArchive();
+    renderArchive();
+  } else if (act === 'view') {
+    const box = el.querySelector('.athumbs');
+    if (box.hidden && !box.childElementCount) {
+      e.pages.forEach((p, i) => {
+        const url = URL.createObjectURL(p.blob);
+        const t = document.createElement('div');
+        t.className = 'athumb';
+        t.innerHTML = `<img src="${url}" alt="${i + 1}-sahifa"><span>${i + 1}</span>`;
+        if (p.text) t.title = p.text.slice(0, 300);
+        t.onclick = () => showViewer(url);
+        box.appendChild(t);
+      });
+    }
+    box.hidden = !box.hidden;
+  } else if (act === 'reopen') {
+    const book = books[e.section];
+    if (book.length && !confirm(`Hozirgi ish ro‘yxatida ${book.length} ta sahifa bor. Arxivdagi sahifalar ularning oxiriga qo‘shilsinmi?`)) return;
+    book.push(...e.pages.map((p, i) => ({
+      ...p, id: Date.now() + i + Math.random(), url: URL.createObjectURL(p.blob),
+      ...(e.section === 'text' ? { status: 'done' } : {}),
+    })));
+    store.save(e.section);
+    switchSection(e.section);
+    updateCount();
+    toast(`${e.pages.length} ta sahifa tahrirga olindi. PDF arxivda ham qoladi`);
+    openGallery();
+  } else if (act === 'del') {
+    if (!confirm(`«${e.name}» va uning sahifalari arxivdan butunlay o‘chirilsinmi?`)) return;
+    archive.splice(archive.indexOf(e), 1);
+    if (lastPdf === e) lastPdf = null;
+    await store.saveArchive();
+    renderArchive();
+    updateCount();
+  }
 }
 
 let fontCache = null;
@@ -668,41 +775,41 @@ async function buildImagePdf() {
 }
 
 async function copyAllText() {
-  const all = pages.map((p) => p.text || '').filter(Boolean).join('\n\n');
+  const src = lastPdf ? lastPdf.pages : pages;
+  const all = src.map((p) => p.text || '').filter(Boolean).join('\n\n');
   try { await navigator.clipboard.writeText(all); toast('Butun matn nusxalandi'); }
   catch (e) { toast('Nusxalab bo‘lmadi'); }
 }
 
-function download() {
-  if (!lastPdf) return;
+function download(entry = lastPdf) {
+  if (!entry) return;
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(lastPdf.blob);
-  a.download = lastPdf.name;
+  a.href = URL.createObjectURL(entry.pdf);
+  a.download = entry.name;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-  toast(`Yuklandi: ${lastPdf.name}`);
+  toast(`Yuklandi: ${entry.name}`);
 }
 
 function renamedPdf() {
-  if (lastPdf) lastPdf.name = cleanName($('#doneName').value) + '.pdf';
+  if (lastPdf) {
+    lastPdf.name = cleanName($('#doneName').value) + '.pdf';
+    store.saveArchive();
+  }
   return lastPdf;
 }
 
-async function share() {
-  const pdf = renamedPdf();
-  const file = new File([pdf.blob], pdf.name, { type: 'application/pdf' });
+async function share(entry) {
+  const pdf = entry || renamedPdf();
+  const file = new File([pdf.pdf], pdf.name, { type: 'application/pdf' });
   try { await navigator.share({ files: [file], title: pdf.name }); } catch (e) { /* bekor qilindi */ }
 }
 
 function newBook() {
-  if (pages.length && !confirm('Barcha saqlangan sahifalar o‘chiriladi. Yangi kitobni boshlaysizmi?')) return;
-  pages.forEach((p) => URL.revokeObjectURL(p.url));
-  pages.length = 0;
+  renamedPdf();
   lastPdf = null;
-  updateCount();
-  store.save();
   backToLive();
 }
 
@@ -718,6 +825,7 @@ function updateCount() {
   $('#galleryLabel').textContent = section === 'text'
     ? (wait ? `📝 Matnlar (o‘qilmoqda: ${wait})` : '📝 Matnlar')
     : '🖼 Sahifalar';
+  $('#archiveCount').textContent = archive.length;
 }
 function setMsg(t) { msg.textContent = t; msg.dataset.kind = ''; }
 function toast(t) {
@@ -745,8 +853,10 @@ $('#count').onclick = () => app.dataset.state === 'live' && openGallery();
 $('#backToCam').onclick = backToLive;
 $('#makePdf').onclick = askPdfName;
 $('#download').onclick = () => { renamedPdf(); download(); };
-$('#doneBack').onclick = openGallery;
+$('#doneBack').onclick = () => { renamedPdf(); openArchive(); };
 $('#newBook').onclick = newBook;
+$('#openArchive').onclick = openArchive;
+$('#archiveBack').onclick = backToLive;
 $('#copyText').onclick = copyAllText;
 $('#sections').addEventListener('click', (e) => {
   const b = e.target.closest('button');
@@ -757,7 +867,7 @@ try { const l = localStorage.getItem('kitob-lang'); if (l) $('#lang').value = l;
 $('#switchCam').onclick = () => { facing = facing === 'environment' ? 'user' : 'environment'; startCamera(); };
 if (navigator.canShare && navigator.canShare({ files: [new File([''], 'a.pdf', { type: 'application/pdf' })] })) {
   $('#share').hidden = false;
-  $('#share').onclick = share;
+  $('#share').onclick = () => share();
 }
 
 $('#modes').addEventListener('click', (e) => {

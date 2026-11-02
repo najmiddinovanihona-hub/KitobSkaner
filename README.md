@@ -18,6 +18,19 @@ Telefonda ham, kompyuterda ham brauzerda ochiladi, hech narsa o'rnatish shart em
 
 Sahifalar bittalab saqlanib boradi. PDF faqat **🖼 Sahifalar → 📄 PDF yaratish** bosilganda, siz bergan nom bilan yaratiladi.
 
+## 🗂 Arxiv
+
+PDF yaratilgach, u skanerlangan sahifalari bilan **🗂 Arxiv**ga tushadi, ish ro'yxati esa yangi kitob uchun bo'shaydi. Arxivda har bir PDF uchun quyidagilar mumkin:
+
+- **⬇ Yuklash**: qayta yuklab olish.
+- **↗ Ulashish**: Telegram va boshqa ilovalarga yuborish (telefonda).
+- **✏ Nom**: nomini o'zgartirish.
+- **👁 Sahifalar**: skanerlangan sahifalarni ko'rish.
+- **↩ Tahrirga**: sahifalarni qaytadan ish ro'yxatiga olish, masalan yana sahifa qo'shib yangi PDF qilish uchun. Bunda PDF arxivda ham qoladi.
+- **🗑**: arxivdan butunlay o'chirish.
+
+Arxiv shu brauzerning o'zida saqlanadi. Brauzer ma'lumotlari tozalansa, arxiv ham o'chadi.
+
 ## 📝 Matn bo'limi (OCR)
 
 Yuqoridagi **📝 Matn** tugmasini bosing va kitob tilini tanlang: o'zbek (lotin yoki kirill), rus yoki ingliz.

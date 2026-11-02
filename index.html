@@ -30,6 +30,7 @@
       <button data-mode="bw">Oq-qora</button>
     </div>
     <label class="auto"><input type="checkbox" id="auto"> Avto</label>
+    <button class="archive-btn" id="openArchive">🗂 Arxiv <b id="archiveCount">0</b></button>
     <div class="count" id="count">0 sahifa</div>
   </header>
 
@@ -47,13 +48,19 @@
       <div id="grid" class="grid"></div>
     </section>
 
+    <section id="archivePanel" class="panel">
+      <h2>🗂 Arxiv</h2>
+      <p class="hint">Yaratilgan barcha PDF’lar sahifalari bilan shu yerda saqlanadi. Istalgan vaqtda qayta yuklash, nomini o‘zgartirish yoki sahifalarini qayta tahrirga olish mumkin.</p>
+      <div id="archiveList" class="alist"></div>
+    </section>
+
     <section id="donePanel" class="panel center">
       <div class="done-icon">✔</div>
       <h2 id="doneTitle">PDF tayyor</h2>
       <label class="field">PDF nomi
         <span class="name-row"><input id="doneName" type="text" autocomplete="off"><span>.pdf</span></span>
       </label>
-      <p class="hint">Nomni o‘zgartirib, «Qayta yuklash»ni bossangiz, PDF yangi nom bilan yuklanadi.</p>
+      <p class="hint">PDF va skanerlangan sahifalar <b>🗂 Arxiv</b>ga saqlandi. Nomni o‘zgartirib, «Qayta yuklash»ni bossangiz, PDF yangi nom bilan yuklanadi.</p>
     </section>
 
     <div id="msg" class="msg"></div>
@@ -78,8 +85,11 @@
       <button id="download" class="btn blue big">⬇ Qayta yuklash</button>
       <button id="share" class="btn big" hidden>↗ Ulashish</button>
       <button id="copyText" class="btn big text-only">📋 Matnni nusxalash</button>
-      <button id="doneBack" class="btn big">🖼 Sahifalar</button>
-      <button id="newBook" class="btn green big">＋ Yangi kitob</button>
+      <button id="doneBack" class="btn big">🗂 Arxiv</button>
+      <button id="newBook" class="btn green big">📷 Yangi kitob</button>
+    </div>
+    <div class="bar archive-only">
+      <button id="archiveBack" class="btn green big">📷 Kameraga qaytish</button>
     </div>
   </footer>
 </div>
