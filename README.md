@@ -14,7 +14,12 @@ Telefonda ham, kompyuterda ham brauzerda ochiladi, hech narsa o'rnatish shart em
    - **✔ Saqlash va keyingi** (Enter): sahifani saqlaydi, siz keyingi sahifani ochasiz.
    - **↺ Qayta olish** (Esc): shu sahifani qaytadan oladi.
    - **⟳ Burish**: sahifani 90° ga buradi.
-4. Hamma sahifalar olingach, **🖼 Sahifalar → 📄 PDF yaratish**ni bosing, nom bering va sifatni tanlang.
+4. Hamma sahifalar olingach, **🖼 Sahifalar** ga kiring. U yerda:
+   - **📄 PDF yaratish**: nom berasiz, sifatni tanlaysiz, PDF yuklanadi va sahifalar bilan birga arxivga tushadi;
+   - **🗂 Arxivlash**: sahifalar PDF qilinmasdan arxivga o'tadi, PDF'ni keyinroq arxivdan yaratasiz;
+   - **＋ Yangi skanerlash**: hozirgi sahifalar arxivga o'tadi va bo'sh ro'yxat bilan yangi kitob boshlanadi.
+
+   Ikkala holatda ham sahifalar asosiy ro'yxatdan olib tashlanadi.
 
 ## PDF sifati
 
@@ -32,6 +37,7 @@ PDF yaratishda sifat tanlanadi va kutiladigan hajm sahifalaringiz bo'yicha hisob
 
 PDF yaratilgach, u skanerlangan sahifalari bilan **🗂 Arxiv**ga tushadi, ish ro'yxati esa yangi kitob uchun bo'shaydi. Arxivda har bir PDF uchun quyidagilar mumkin:
 
+- **📄 PDF yaratish**: arxivlangan, lekin hali PDF qilinmagan sahifalardan PDF yaratish.
 - **⬇ Yuklash**: qayta yuklab olish.
 - **↗ Ulashish**: Telegram va boshqa ilovalarga yuborish (telefonda).
 - **✏ Nom**: nomini o'zgartirish.
@@ -50,7 +56,7 @@ Yuqoridagi **📝 Matn** tugmasini bosing. Til standart holatda **Avto**: o'zbek
 3. Tilni o'zgartirsangiz, ilova boshqa tilda o'qilgan sahifalarni yangi tilda qayta o'qishni taklif qiladi.
 4. **📄 PDF yaratish** bosilganda **matnli PDF** chiqadi: undagi matnni belgilab nusxa olish va qidirish mumkin. 500 sahifali matnli PDF bir necha soniyada tayyor bo'ladi va 1 MB atrofida chiqadi. **📋 Matnni nusxalash** tugmasi butun matnni nusxalaydi.
 
-Birinchi marta matn o'qilayotganda til ma'lumotlari (bir necha MB) yuklanadi, keyingi safar tezroq ishlaydi. Telefonda bitta sahifani o'qish taxminan 5–20 soniya oladi.
+Matn bo'limiga kirishingiz bilan til ma'lumotlari (~7 MB) oldindan yuklana boshlaydi, keyingi safar ular brauzerda saqlangan bo'ladi. Telefonning yadro va xotira hajmiga qarab 2–3 ta sahifa **bir vaqtda parallel** o'qiladi. Bitta sahifa qotib qolsa, 3 daqiqadan keyin xato bilan to'xtatiladi va uni ↻ bilan qayta o'qish mumkin.
 
 ## Katta kitoblar uchun maslahatlar
 

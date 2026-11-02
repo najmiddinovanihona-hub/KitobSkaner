@@ -425,14 +425,27 @@ function switchSection(sec) {
   updateCount();
   if (app.dataset.state === 'review') render();
   else if (app.dataset.state !== 'live') openGallery();
+  if (sec === 'text') warmUpOcr();
   toast(sec === 'text'
     ? '📝 Matn bo‘limi: sahifadagi matn o‘qib olinadi'
     : '🖼 Rasm bo‘limi: sahifa rasm sifatida saqlanadi');
 }
 
 // ---------------------------------------------------------------- Matnni o'qish (OCR)
-const ocr = { worker: null, lang: null, busy: false, done: 0, errShown: false };
-const OCR_RECYCLE = 40;          // shuncha sahifadan keyin xotirani bo'shatish uchun qayta ishga tushiriladi
+// Bir nechta sahifa parallel o'qiladi: har bir "slot" — alohida Tesseract ishchisi.
+const ocr = { slots: [], running: false, errShown: false };
+const OCR_RECYCLE = 40;          // ishchi shuncha sahifadan keyin xotirani bo'shatish uchun qayta yaratiladi
+const OCR_TIMEOUT_MS = 180000;   // bitta sahifa shundan uzoq o'qilsa, qayta urinib ko'riladi
+const OCR_MAX_DIM = 1800;        // o'qishdan oldin rasm shu o'lchamgacha kichraytiriladi
+
+// Telefonning yadro va xotirasiga qarab parallel ishchilar soni
+function ocrSlotCount() {
+  const cores = navigator.hardwareConcurrency || 2;
+  const mem = navigator.deviceMemory || 4;
+  if (mem <= 2 || cores <= 2) return 1;
+  if (mem <= 4 || cores <= 4) return 2;
+  return 3;
+}
 
 function langCode() { return $('#lang').value; }
 function langName(code) {
@@ -440,29 +453,56 @@ function langName(code) {
   return o ? o.textContent : code;
 }
 
-async function getWorker() {
+async function slotWorker(slot) {
   if (!window.Tesseract) throw new Error('OCR moduli yuklanmadi — internetni tekshiring');
   const lang = langCode();
-  if (ocr.worker && ocr.done >= OCR_RECYCLE) {
-    await ocr.worker.terminate().catch(() => {});
-    ocr.worker = null; ocr.done = 0;
+  if (slot.worker && slot.done >= OCR_RECYCLE) {
+    await slot.worker.terminate().catch(() => {});
+    slot.worker = null;
   }
-  if (!ocr.worker) {
-    ocr.worker = await Tesseract.createWorker(lang, 1, {
-      logger: (m) => {
-        const p = books.text.find((x) => x.status === 'working');
-        if (!p) return;
-        if (m.status === 'recognizing text') p.progress = m.progress;
-        else if (/load|initializ/i.test(m.status)) p.loading = true;
-        updateCard(p);
-      },
-    });
-    ocr.lang = lang;
-  } else if (ocr.lang !== lang) {
-    await ocr.worker.reinitialize(lang);
-    ocr.lang = lang;
+  if (!slot.worker) {
+    slot.ready = (async () => {
+      slot.worker = await Tesseract.createWorker(lang, 1, {
+        logger: (m) => {
+          const p = slot.page;
+          if (!p) return;
+          if (m.status === 'recognizing text') p.progress = m.progress;
+          else if (/load|initializ/i.test(m.status)) p.loading = true;
+          updateCard(p);
+        },
+      });
+      slot.lang = lang; slot.done = 0;
+    })();
+    try { await slot.ready; } catch (e) { slot.worker = null; throw e; }
+  } else if (slot.lang !== lang) {
+    await slot.worker.reinitialize(lang);
+    slot.lang = lang;
   }
-  return ocr.worker;
+  return slot.worker;
+}
+
+// Matn bo'limiga kirilganda til modellari oldindan yuklab qo'yiladi
+function warmUpOcr() {
+  if (!window.Tesseract) { setTimeout(warmUpOcr, 1000); return; }
+  if (!ocr.slots.length) ocr.slots = Array.from({ length: ocrSlotCount() }, () => ({}));
+  const s = ocr.slots[0];
+  if (!s.worker && !s.ready) slotWorker(s).catch(() => {});
+}
+
+async function ocrInput(blob) {
+  // Juda katta rasmni kichraytirish o'qishni tezlashtiradi, sifatga ta'sir qilmaydi
+  const bmp = await createImageBitmap(blob);
+  const s = OCR_MAX_DIM / Math.max(bmp.width, bmp.height);
+  if (s >= 1) { bmp.close && bmp.close(); return blob; }
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  bmp.close && bmp.close();
+  return c;
+}
+
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((_, fail) => setTimeout(() => fail(new Error('juda uzoq davom etdi')), ms))]);
 }
 
 function tidyText(t) {
@@ -474,36 +514,45 @@ function tidyText(t) {
     .join('\n\n');
 }
 
+async function runSlot(slot) {
+  let p;
+  while ((p = books.text.find((x) => x.status === 'pending'))) {
+    p.status = 'working'; p.progress = 0; p.loading = false; slot.page = p;
+    updateCard(p); updateCount();
+    try {
+      const worker = await slotWorker(slot);
+      const input = await ocrInput(await store.getBlob(p.img));
+      const { data } = await withTimeout(worker.recognize(input), OCR_TIMEOUT_MS);
+      slot.done++;
+      if (!books.text.includes(p)) continue;          // o'qilayotganda o'chirilgan
+      p.text = tidyText(data.text);
+      p.lang = slot.lang;
+      p.status = 'done';
+    } catch (e) {
+      p.status = 'error';
+      p.error = e.message || String(e);
+      if (!ocr.errShown) { ocr.errShown = true; toast('⚠ Matnni o‘qib bo‘lmadi: ' + p.error); }
+      if (slot.worker) { slot.worker.terminate().catch(() => {}); slot.worker = null; slot.ready = null; }
+    } finally {
+      slot.page = null;
+    }
+    updateCard(p);
+    store.saveList('text');
+    updateCount();
+  }
+}
+
 async function ocrQueue() {
-  if (ocr.busy) return;
-  ocr.busy = true;
+  if (ocr.running || !books.text.some((x) => x.status === 'pending')) return;
+  ocr.running = true;
   keepAwake();
   try {
-    let p;
-    while ((p = books.text.find((x) => x.status === 'pending'))) {
-      p.status = 'working'; p.progress = 0; p.loading = false; updateCard(p); updateCount();
-      try {
-        const worker = await getWorker();
-        const blob = await store.getBlob(p.img);
-        const { data } = await worker.recognize(blob);
-        ocr.done++;
-        if (!books.text.includes(p)) continue;          // o'qilayotganda o'chirilgan
-        p.text = tidyText(data.text);
-        p.lang = ocr.lang;
-        p.status = 'done';
-      } catch (e) {
-        p.status = 'error';
-        p.error = e.message || String(e);
-        if (!ocr.errShown) { ocr.errShown = true; toast('⚠ Matnni o‘qib bo‘lmadi: ' + p.error); }
-        if (ocr.worker) { await ocr.worker.terminate().catch(() => {}); ocr.worker = null; }
-      }
-      updateCard(p);
-      store.saveList('text');
-      updateCount();
-    }
+    if (!ocr.slots.length) ocr.slots = Array.from({ length: ocrSlotCount() }, () => ({}));
+    await Promise.all(ocr.slots.map(runSlot));
   } finally {
-    ocr.busy = false;
+    ocr.running = false;
   }
+  if (books.text.some((x) => x.status === 'pending')) ocrQueue();   // ish davomida yangi sahifa qo'shilgan bo'lsa
 }
 
 function waitingCount() {
@@ -740,24 +789,39 @@ function cleanName(s) {
   return n || defaultName();
 }
 
-function askPdfName() {
-  if (!pages.length) { toast('Hali birorta ham sahifa saqlanmagan'); return; }
-  if (section === 'text' && waitingCount()) {
+// Bitta oyna uch xil ish uchun: ish ro'yxatidan PDF, ish ro'yxatini arxivlash,
+// arxivdagi (hali PDF qilinmagan) yozuvdan PDF yaratish
+const dlgState = { mode: 'pdf', entry: null, list: [], sec: 'image' };
+
+function openDialog(mode, entry) {
+  const list = entry ? entry.pages : pages;
+  const sec = entry ? entry.section : section;
+  if (!list.length) { toast('Hali birorta ham sahifa saqlanmagan'); return; }
+  if (!entry && sec === 'text' && waitingCount()) {
     toast(`Matn o‘qilishi tugashini kuting: yana ${waitingCount()} ta sahifa qoldi`);
     return;
   }
-  const dlg = $('#pdfDialog');
-  $('#dialogInfo').textContent = section === 'text'
-    ? `${pages.length} ta sahifaning matni bitta matnli PDF faylga yig‘iladi.`
-    : `${pages.length} ta sahifa bitta PDF faylga yig‘iladi.`;
-  $('#pdfName').value = lastPdf ? lastPdf.name.replace(/\.pdf$/, '') : defaultName();
-  $('#pdfQuality').value = pages.length > 100 ? 'medium' : 'high';
+  Object.assign(dlgState, { mode, entry, list, sec });
+  document.body.dataset.dlg = mode;
+  const n = list.length;
+  $('#dialogTitle').textContent = mode === 'archive' ? '🗂 Arxivlash' : '📄 PDF yaratish';
+  $('#dialogOk').textContent = mode === 'archive' ? '🗂 Arxivlash' : '📄 Yaratish';
+  $('#dialogInfo').textContent = mode === 'archive'
+    ? `${n} ta sahifa arxivga o‘tadi va asosiy ro‘yxatdan olib tashlanadi. PDF’ni keyinroq arxivdan yaratishingiz mumkin.`
+    : sec === 'text'
+      ? `${n} ta sahifaning matni bitta matnli PDF faylga yig‘iladi.`
+      : `${n} ta sahifa bitta PDF faylga yig‘iladi.`;
+  $('#pdfName').value = entry ? entry.name.replace(/\.pdf$/, '') : lastPdf ? lastPdf.name.replace(/\.pdf$/, '') : defaultName();
+  $('#pdfQuality').value = n > 100 ? 'medium' : 'high';
+  $('#qualityField').hidden = mode === 'archive' || sec === 'text';
   sizeSample = null;
-  if (section === 'image') updateSizeHint();
+  if (!$('#qualityField').hidden) updateSizeHint();
+  const dlg = $('#pdfDialog');
   dlg.returnValue = '';
   dlg.showModal();
   setTimeout(() => $('#pdfName').select(), 50);
 }
+function askPdfName() { openDialog('pdf'); }
 
 const QUALITY = {
   high: { dim: 0, q: 0 },                    // asl rasmlar, qayta siqilmaydi
@@ -768,11 +832,11 @@ const QUALITY = {
 // Hajmni bir nechta haqiqiy sahifani siqib ko'rib taxmin qiladi
 let sizeSample = null;
 async function updateSizeHint() {
-  const el = $('#sizeHint'), quality = $('#pdfQuality').value;
+  const el = $('#sizeHint'), quality = $('#pdfQuality').value, list = dlgState.list;
   el.textContent = 'Hajm hisoblanmoqda…';
   if (!sizeSample) {
-    const idx = [...new Set([0, Math.floor(pages.length / 2), pages.length - 1])];
-    sizeSample = (await Promise.all(idx.map((i) => store.getBlob(pages[i].img)))).filter(Boolean);
+    const idx = [...new Set([0, Math.floor(list.length / 2), list.length - 1])];
+    sizeSample = (await Promise.all(idx.map((i) => store.getBlob(list[i].img)))).filter(Boolean);
     sizeSample.cache = {};
   }
   if (!sizeSample.length) { el.textContent = ''; return; }
@@ -782,7 +846,7 @@ async function updateSizeHint() {
     sizeSample.cache[quality] = sum / sizeSample.length;
   }
   if ($('#pdfQuality').value !== quality) return;
-  const mb = (sizeSample.cache[quality] * pages.length) / 1048576;
+  const mb = (sizeSample.cache[quality] * list.length) / 1048576;
   el.textContent = `Taxminiy hajm: ~${mb < 1 ? '1' : Math.round(mb)} MB` +
     (mb > 100 && quality !== 'low'
       ? ` — katta fayl, ${quality === 'high' ? '«O‘rta» yoki «Past»' : '«Past»'}ni tanlash tavsiya etiladi`
@@ -791,7 +855,11 @@ async function updateSizeHint() {
 $('#pdfQuality').onchange = updateSizeHint;
 
 $('#pdfDialog').addEventListener('close', () => {
-  if ($('#pdfDialog').returnValue === 'ok') makePdf(cleanName($('#pdfName').value), $('#pdfQuality').value);
+  if ($('#pdfDialog').returnValue !== 'ok') return;
+  const name = cleanName($('#pdfName').value), quality = $('#pdfQuality').value;
+  if (dlgState.mode === 'archive') archiveCurrent(name);
+  else if (dlgState.mode === 'archivePdf') pdfForEntry(dlgState.entry, name, quality);
+  else makePdf(name, quality);
 });
 
 function busy(text, frac) {
@@ -803,37 +871,80 @@ function busy(text, frac) {
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-async function makePdf(name, quality = 'high') {
+async function buildPdf(list, sec, quality) {
   keepAwake();
   busy('PDF tayyorlanmoqda…', 0);
-  let blob;
   try {
-    blob = section === 'text' ? await buildTextPdf() : await buildImagePdf(quality);
+    return sec === 'text' ? await buildTextPdf(list) : await buildImagePdf(quality, list);
   } catch (e) {
-    busy(null);
     toast('PDF yaratib bo‘lmadi: ' + (e.message || e));
-    return;
+    return null;
+  } finally {
+    busy(null);
   }
-  busy('Arxivga saqlanmoqda…', 1);
-  // PDF va uning sahifalari arxivga tushadi, ish ro'yxati yangi kitob uchun bo'shaydi
+}
+
+// Ish ro'yxatidagi sahifalarni arxivga ko'chiradi va ro'yxatni bo'shatadi
+async function moveToArchive(name, pdf) {
   const entry = {
     id: Date.now(), name: name + '.pdf', date: Date.now(), section,
-    pdfKey: await store.putBlob(blob), size: blob.size,
+    pdfKey: pdf ? await store.putBlob(pdf) : null, size: pdf ? pdf.size : 0,
     pages: pages.map(({ w, h, img, th, text }) => ({ w, h, img, th, text })),
   };
   archive.unshift(entry);
   await store.saveArchive();
-  const n = pages.length;
   pages.length = 0;
+  lastPdf = null;
   await store.saveList();
   updateCount();
-  busy(null);
+  return entry;
+}
 
+async function makePdf(name, quality = 'high') {
+  const n = pages.length;
+  const blob = await buildPdf(pages, section, quality);
+  if (!blob) return;
+  const entry = await moveToArchive(name, blob);
   lastPdf = entry;
   download(entry, blob);
   $('#doneTitle').textContent = section === 'text' ? `${n} sahifali matnli PDF tayyor` : `${n} sahifali PDF tayyor`;
   $('#doneName').value = name;
   setState('done');
+}
+
+async function archiveCurrent(name) {
+  const n = pages.length;
+  await moveToArchive(name, null);
+  toast(`${n} ta sahifa arxivga o‘tkazildi`);
+  openArchive();
+}
+
+async function pdfForEntry(entry, name, quality) {
+  const blob = await buildPdf(entry.pages, entry.section, quality);
+  if (!blob) return;
+  entry.name = name + '.pdf';
+  entry.pdfKey = await store.putBlob(blob);
+  entry.size = blob.size;
+  await store.saveArchive();
+  download(entry, blob);
+  renderArchive();
+  showStorage();
+}
+
+// Yangi skanerlash: ish ro'yxatida sahifa bo'lsa, avval ularni arxivlashni taklif qiladi
+function newScan() {
+  if (pages.length) {
+    if (section === 'text' && waitingCount()) {
+      toast(`Avval matn o‘qilishi tugashini kuting: yana ${waitingCount()} ta sahifa qoldi`);
+      return;
+    }
+    if (!confirm(`Hozirgi ro‘yxatda ${pages.length} ta sahifa bor.\nUlarni arxivga o‘tkazib, yangi skanerlashni boshlaymizmi?`)) return;
+    archiveCurrent(defaultName()).then(() => { backToLive(); toast('Yangi skanerlash boshlandi. Oldingi sahifalar arxivda'); });
+    return;
+  }
+  lastPdf = null;
+  backToLive();
+  toast('Yangi skanerlash: birinchi sahifani ko‘rsating');
 }
 
 let fontCache = null;
@@ -850,7 +961,7 @@ async function loadFont() {
   return fontCache;
 }
 
-async function buildTextPdf() {
+async function buildTextPdf(list = pages) {
   const { jsPDF } = window.jspdf;
   busy('Shrift yuklanmoqda…', 0);
   const font = await loadFont();
@@ -862,7 +973,7 @@ async function buildTextPdf() {
   const W = 210, H = 297, M = 20, size = 12;
   const lineH = size * 0.3528 * 1.45;                       // pt → mm, qator oralig'i 1.45
   doc.setFontSize(size);
-  for (const [i, p] of pages.entries()) {
+  for (const [i, p] of list.entries()) {
     if (i > 0) doc.addPage();
     let y = M + lineH;
     const paragraphs = (p.text || '').split(/\n\s*\n/);
@@ -881,7 +992,7 @@ async function buildTextPdf() {
     doc.text(`— ${i + 1} —`, W / 2, H - 10, { align: 'center' });
     doc.setTextColor(0);
     doc.setFontSize(size);
-    if (i % 10 === 0) { busy(`PDF: ${i + 1} / ${pages.length} sahifa`, (i + 1) / pages.length); await tick(); }
+    if (i % 10 === 0) { busy(`PDF: ${i + 1} / ${list.length} sahifa`, (i + 1) / list.length); await tick(); }
   }
   busy('PDF yakunlanmoqda…', 1);
   await tick();
@@ -913,7 +1024,7 @@ async function shrink(blob, q) {
 
 // Rasmli PDF'ni qo'lda yozamiz: JPEG'lar PDF ichiga to'g'ridan-to'g'ri qo'yiladi va
 // hammasi xotiraga yuklanmaydi — 500 sahifali kitob ham telefonda yig'iladi.
-async function buildImagePdf(quality) {
+async function buildImagePdf(quality, list = pages) {
   const q = QUALITY[quality] || QUALITY.high;
   const enc = new TextEncoder();
   const parts = [], offsets = [];
@@ -925,14 +1036,14 @@ async function buildImagePdf(quality) {
   };
   const obj = (n, body) => { offsets[n] = pos; add(`${n} 0 obj\n${body}\nendobj\n`); };
 
-  const n = pages.length;
+  const n = list.length;
   // 1 — katalog, 2 — sahifalar ro'yxati, keyin har sahifa uchun 3 ta obyekt
   const pageObj = (i) => 3 + i * 3;
   add('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
   obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
-  obj(2, `<< /Type /Pages /Count ${n} /Kids [${pages.map((_, i) => `${pageObj(i)} 0 R`).join(' ')}] >>`);
+  obj(2, `<< /Type /Pages /Count ${n} /Kids [${list.map((_, i) => `${pageObj(i)} 0 R`).join(' ')}] >>`);
 
-  for (const [i, p] of pages.entries()) {
+  for (const [i, p] of list.entries()) {
     let blob = await store.getBlob(p.img), w = p.w, h = p.h;
     if (!blob) throw new Error(`${i + 1}-sahifa rasmi topilmadi`);
     if (q.dim && Math.max(w, h) > q.dim) ({ blob, w, h } = await shrink(blob, q));
@@ -997,11 +1108,6 @@ async function share(entry) {
   try { await navigator.share({ files: [file], title: pdf.name }); } catch (e) { /* bekor qilindi */ }
 }
 
-function newBook() {
-  renamedPdf();
-  lastPdf = null;
-  backToLive();
-}
 
 // ---------------------------------------------------------------- Arxiv
 function openArchive() {
@@ -1035,22 +1141,24 @@ function renderArchive() {
   list.querySelectorAll('img').forEach((i) => lazy.unobserve(i));
   list.innerHTML = '';
   if (!archive.length) {
-    list.innerHTML = '<div class="empty">Arxiv hozircha bo‘sh. PDF yaratganingizda u sahifalari bilan shu yerga tushadi.</div>';
+    list.innerHTML = '<div class="empty">Arxiv hozircha bo‘sh. Sahifalarni «🗂 Arxivlash» yoki «📄 PDF yaratish» bilan shu yerga o‘tkazasiz.</div>';
   }
   for (const e of archive) {
     const el = document.createElement('div');
     el.className = 'acard';
+    const hasPdf = !!e.pdfKey;
     el.innerHTML = `
       <div class="ahead">
         <div class="aicon">${e.section === 'text' ? '📝' : '🖼'}</div>
         <div class="ainfo">
           <div class="aname"></div>
-          <div class="ameta">${fmtDate(e.date)} · ${e.pages.length} sahifa · ${fmtSize(e.size || 0)} · ${e.section === 'text' ? 'Matnli' : 'Rasmli'}</div>
+          <div class="ameta">${fmtDate(e.date)} · ${e.pages.length} sahifa · ${hasPdf ? fmtSize(e.size || 0) : 'PDF hali yaratilmagan'} · ${e.section === 'text' ? 'Matnli' : 'Rasmli'}</div>
         </div>
       </div>
       <div class="aacts">
-        <button data-act="dl">⬇ Yuklash</button>
-        ${$('#share').hidden ? '' : '<button data-act="share">↗ Ulashish</button>'}
+        ${hasPdf
+          ? `<button data-act="dl">⬇ Yuklash</button>${$('#share').hidden ? '' : '<button data-act="share">↗ Ulashish</button>'}`
+          : '<button data-act="mkpdf" class="primary">📄 PDF yaratish</button>'}
         <button data-act="rename">✏ Nom</button>
         <button data-act="view">👁 Sahifalar</button>
         <button data-act="reopen" title="Sahifalarni qayta tahrirga olish">↩ Tahrirga</button>
@@ -1067,6 +1175,7 @@ async function archiveAction(e, act, el) {
   if (!act) return;
   if (act === 'dl') download(e);
   else if (act === 'share') share(e);
+  else if (act === 'mkpdf') openDialog('archivePdf', e);
   else if (act === 'rename') {
     const n = prompt('Yangi nom:', e.name.replace(/\.pdf$/, ''));
     if (n === null) return;
@@ -1152,9 +1261,11 @@ $('#backToCam').onclick = backToLive;
 $('#makePdf').onclick = askPdfName;
 $('#download').onclick = () => { renamedPdf(); download(); };
 $('#doneBack').onclick = () => { renamedPdf(); openArchive(); };
-$('#newBook').onclick = newBook;
+$('#newBook').onclick = () => { renamedPdf(); newScan(); };
 $('#openArchive').onclick = openArchive;
-$('#archiveBack').onclick = backToLive;
+$('#archiveBack').onclick = newScan;
+$('#archiveNow').onclick = () => openDialog('archive');
+$('#newScan').onclick = newScan;
 $('#copyText').onclick = copyAllText;
 $('#sections').addEventListener('click', (e) => {
   const b = e.target.closest('button');

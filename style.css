@@ -109,6 +109,11 @@ dialog h2 { font-size: 18px; }
 .bar-mini { height: 4px; background: #34343f; border-radius: 2px; overflow: hidden; }
 .bar-mini i { display: block; height: 100%; background: #3cdc5a; width: 0; transition: width .3s; }
 
+.field[hidden] { display: none; }
+.ghead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.btn.small { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
+.aacts .primary { background: #1565c0; }
+.aacts .primary:hover { background: #1976d2; }
 .lang-label { font-size: 13px; color: #b9b9c6; margin-right: -6px; }
 .quality { margin-top: 14px; }
 .quality select { display: block; width: 100%; margin-top: 6px; padding: 11px; border-radius: 10px; border: 1px solid #44444f;
@@ -149,7 +154,9 @@ dialog h2 { font-size: 18px; }
 @media (max-width: 600px) {
   .brand { width: 100%; }
   .count, .lang-label { display: none; }
-  .review-only, .done-only { flex-wrap: wrap; }
+  .review-only, .done-only, .gallery-only { flex-wrap: wrap; }
+  .gallery-only .btn.big { flex-basis: 45%; }
+  .gallery-only #makePdf { flex-basis: 100%; }
   .review-only .btn:not(.big) { flex: 1; }
   .review-only .btn.big { flex-basis: 100%; }
   .done-only .btn.big { flex-basis: 45%; }

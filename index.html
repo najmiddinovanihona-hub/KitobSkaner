@@ -43,10 +43,9 @@
     <div id="progress"></div>
 
     <section id="gallery" class="panel">
-      <h2 class="image-only">Saqlangan sahifalar</h2>
-      <p class="hint image-only">Sahifalarni o‘chirish yoki ◀ ▶ bilan tartibini o‘zgartirish mumkin. Tayyor bo‘lsa, «PDF yaratish»ni bosing.</p>
-      <h2 class="text-only">O‘qilgan matnlar</h2>
-      <p class="hint text-only">Har bir sahifadan o‘qilgan matn shu yerda. Xatolarni to‘g‘ridan-to‘g‘ri tuzatishingiz mumkin, o‘zgarishlar o‘zi saqlanadi. Tayyor bo‘lsa, «PDF yaratish»ni bosing.</p>
+      <div class="ghead"><h2 class="image-only">Saqlangan sahifalar</h2><h2 class="text-only">O‘qilgan matnlar</h2><button id="newScan" class="btn small">＋ Yangi skanerlash</button></div>
+      <p class="hint image-only">Sahifalarni o‘chirish yoki ◀ ▶ bilan tartibini o‘zgartirish mumkin. Tayyor bo‘lsa, «PDF yaratish»ni bosing yoki keyinroq qilish uchun «Arxivlash»ga o‘tkazing.</p>
+      <p class="hint text-only">Har bir sahifadan o‘qilgan matn shu yerda. Xatolarni to‘g‘ridan-to‘g‘ri tuzatishingiz mumkin, o‘zgarishlar o‘zi saqlanadi. Tayyor bo‘lsa, «PDF yaratish»ni bosing yoki keyinroq qilish uchun «Arxivlash»ga o‘tkazing.</p>
       <div id="grid" class="grid"></div>
     </section>
 
@@ -82,6 +81,7 @@
     </div>
     <div class="bar gallery-only">
       <button id="backToCam" class="btn big">📷 Davom ettirish</button>
+      <button id="archiveNow" class="btn big">🗂 Arxivlash</button>
       <button id="makePdf" class="btn blue big">📄 PDF yaratish</button>
     </div>
     <div class="bar done-only">
@@ -89,22 +89,22 @@
       <button id="share" class="btn big" hidden>↗ Ulashish</button>
       <button id="copyText" class="btn big text-only">📋 Matnni nusxalash</button>
       <button id="doneBack" class="btn big">🗂 Arxiv</button>
-      <button id="newBook" class="btn green big">📷 Yangi kitob</button>
+      <button id="newBook" class="btn green big">＋ Yangi skanerlash</button>
     </div>
     <div class="bar archive-only">
-      <button id="archiveBack" class="btn green big">📷 Kameraga qaytish</button>
+      <button id="archiveBack" class="btn green big">＋ Yangi skanerlash</button>
     </div>
   </footer>
 </div>
 
 <dialog id="pdfDialog">
   <form method="dialog">
-    <h2>PDF yaratish</h2>
+    <h2 id="dialogTitle">PDF yaratish</h2>
     <p id="dialogInfo" class="hint"></p>
     <label class="field">Fayl nomi
       <span class="name-row"><input id="pdfName" type="text" autocomplete="off" required><span>.pdf</span></span>
     </label>
-    <label class="field image-only quality">Sifat
+    <label class="field quality" id="qualityField">Sifat
       <select id="pdfQuality">
         <option value="high">Yuqori (asl rasmlar)</option>
         <option value="medium">O‘rta — kichikroq fayl</option>
@@ -114,7 +114,7 @@
     </label>
     <div class="dialog-buttons">
       <button value="cancel" class="btn" formnovalidate>Bekor qilish</button>
-      <button value="ok" class="btn blue">📄 Yaratish</button>
+      <button value="ok" class="btn blue" id="dialogOk">📄 Yaratish</button>
     </div>
   </form>
 </dialog>
